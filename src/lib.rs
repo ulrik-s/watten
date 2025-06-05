@@ -170,56 +170,7 @@ pub enum GameResult {
     RuleViolation = 3,
 }
 
-use std::collections::HashMap;
-
-/// Database holding evaluated games keyed by permutation index
-pub struct GameDatabase {
-    results: HashMap<u32, GameResult>,
-}
-
-impl GameDatabase {
-    pub fn new() -> Self {
-        Self {
-            results: HashMap::new(),
-        }
-    }
-
-    pub fn make_index(p1: usize, p2: usize, p3: usize, p4: usize) -> u32 {
-        (((p1 * HAND_PERMUTATIONS + p2) * HAND_PERMUTATIONS + p3) * HAND_PERMUTATIONS + p4) as u32
-    }
-
-    pub fn set(&mut self, p1: usize, p2: usize, p3: usize, p4: usize, result: GameResult) {
-        let idx = Self::make_index(p1, p2, p3, p4);
-        self.results.insert(idx, result);
-    }
-
-    pub fn get(&self, p1: usize, p2: usize, p3: usize, p4: usize) -> GameResult {
-        let idx = Self::make_index(p1, p2, p3, p4);
-        *self.results.get(&idx).unwrap_or(&GameResult::NotPlayed)
-    }
-
-    /// Count game results over all index combinations within the provided ranges.
-    pub fn counts_in_ranges(
-        &self,
-        p1: std::ops::Range<usize>,
-        p2: std::ops::Range<usize>,
-        p3: std::ops::Range<usize>,
-        p4: std::ops::Range<usize>,
-    ) -> [u32; 4] {
-        let mut counts = [0u32; 4];
-        for i1 in p1.clone() {
-            for i2 in p2.clone() {
-                for i3 in p3.clone() {
-                    for i4 in p4.clone() {
-                        let r = self.get(i1, i2, i3, i4) as usize;
-                        counts[r] += 1;
-                    }
-                }
-            }
-        }
-        counts
-    }
-}
+pub mod database;
 
 #[cfg(test)]
 mod tests {
@@ -258,7 +209,8 @@ mod tests {
 
     #[test]
     fn db_counts_over_range() {
-        let mut db = GameDatabase::new();
+        use crate::database::{GameDatabase, InMemoryGameDatabase};
+        let mut db = InMemoryGameDatabase::new();
         db.set(0, 0, 0, 0, GameResult::Team1Win);
         let counts = db.counts_in_ranges(0..1, 0..1, 0..1, 0..1);
         assert_eq!(counts[GameResult::Team1Win as usize], 1);
@@ -266,5 +218,5 @@ mod tests {
     }
 }
 
-pub mod player;
 pub mod game;
+pub mod player;
