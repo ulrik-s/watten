@@ -6,6 +6,18 @@ pub enum Suit {
     Acorns,
 }
 
+impl std::fmt::Display for Suit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Suit::Hearts => "Hearts",
+            Suit::Bells => "Bells",
+            Suit::Leaves => "Leaves",
+            Suit::Acorns => "Acorns",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Rank {
     Seven,
@@ -20,6 +32,23 @@ pub enum Rank {
     Weli,
 }
 
+impl std::fmt::Display for Rank {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Rank::Seven => "7",
+            Rank::Eight => "8",
+            Rank::Nine => "9",
+            Rank::Ten => "10",
+            Rank::Unter => "Unter",
+            Rank::Ober => "Ober",
+            Rank::King => "King",
+            Rank::Ace => "Ace",
+            Rank::Weli => "Weli",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Card {
     pub suit: Suit,
@@ -29,6 +58,12 @@ pub struct Card {
 impl Card {
     pub fn new(suit: Suit, rank: Rank) -> Self {
         Self { suit, rank }
+    }
+}
+
+impl std::fmt::Display for Card {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} of {}", self.rank, self.suit)
     }
 }
 
@@ -46,6 +81,13 @@ pub fn deck() -> Vec<Card> {
     // Add Weli (6 of Bells)
     cards.push(Card::new(Suit::Bells, Weli));
     cards
+}
+
+/// Shuffle a deck of cards in place
+pub fn shuffle(deck: &mut [Card]) {
+    use rand::seq::SliceRandom;
+    let mut rng = rand::thread_rng();
+    deck.shuffle(&mut rng);
 }
 
 /// Number of ways a hand of five cards can be ordered
@@ -223,3 +265,6 @@ mod tests {
         assert_eq!(counts[GameResult::NotPlayed as usize], 0);
     }
 }
+
+pub mod player;
+pub mod game;
