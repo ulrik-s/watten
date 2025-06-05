@@ -1,6 +1,7 @@
+use crate::database::{GameDatabase, InMemoryGameDatabase};
 use crate::player::Player;
 use crate::{
-    all_hand_orders, deck, perm_prefix_range, shuffle, Card, GameDatabase, GameResult, Rank, Suit,
+    all_hand_orders, deck, perm_prefix_range, shuffle, Card, GameResult, Rank, Suit,
     HAND_PERMUTATIONS,
 };
 
@@ -93,7 +94,7 @@ pub struct GameState {
     pub rechte: Option<Card>,
     pub scores: [usize; 2],
     pub round_points: usize,
-    pub db: GameDatabase,
+    pub db: Box<dyn GameDatabase>,
     orig_hands: [[Card; TRICKS_PER_ROUND]; 4],
     played: [Vec<usize>; 4],
 }
@@ -115,7 +116,7 @@ impl GameState {
             rechte: None,
             scores: [0, 0],
             round_points: ROUND_POINTS,
-            db: GameDatabase::new(),
+            db: Box::new(InMemoryGameDatabase::new()),
             orig_hands: [[DUMMY_CARD; TRICKS_PER_ROUND]; 4],
             played: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
         }
@@ -149,7 +150,7 @@ impl GameState {
     }
 
     fn populate_database(&mut self) {
-        self.db = GameDatabase::new();
+        self.db = Box::new(InMemoryGameDatabase::new());
         let perms = all_hand_orders();
         let rechte = self.rechte.unwrap();
         for (i1, p1) in perms.iter().enumerate() {
