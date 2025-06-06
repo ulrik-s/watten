@@ -88,6 +88,23 @@ fn simulate_game(
     }
 }
 
+/// Play a round using specific hand permutation ids for each player.
+pub fn play_hand(
+    hands: &[[Card; TRICKS_PER_ROUND]; 4],
+    hand_ids: [usize; 4],
+    dealer: usize,
+    rechte: Card,
+) -> GameResult {
+    let perms = all_hand_orders();
+    let orders = [
+        perms[hand_ids[0]],
+        perms[hand_ids[1]],
+        perms[hand_ids[2]],
+        perms[hand_ids[3]],
+    ];
+    simulate_game(hands, orders, dealer, rechte)
+}
+
 pub struct GameState {
     pub players: [Player; 4],
     pub dealer: usize,
@@ -153,16 +170,12 @@ impl GameState {
         self.db = Box::new(InMemoryGameDatabase::new());
         let perms = all_hand_orders();
         let rechte = self.rechte.unwrap();
-        for (i1, p1) in perms.iter().enumerate() {
-            for (i2, p2) in perms.iter().enumerate() {
-                for (i3, p3) in perms.iter().enumerate() {
-                    for (i4, p4) in perms.iter().enumerate() {
-                        let result = simulate_game(
-                            &self.orig_hands,
-                            [*p1, *p2, *p3, *p4],
-                            self.dealer,
-                            rechte,
-                        );
+        for i1 in 0..perms.len() {
+            for i2 in 0..perms.len() {
+                for i3 in 0..perms.len() {
+                    for i4 in 0..perms.len() {
+                        let result =
+                            play_hand(&self.orig_hands, [i1, i2, i3, i4], self.dealer, rechte);
                         self.db.set(i1, i2, i3, i4, result);
                     }
                 }
@@ -238,7 +251,7 @@ impl GameState {
     }
 
     #[allow(unused_assignments)]
-    pub fn play_round(&mut self) -> usize {
+    pub fn play_round(&mut self) -> GameResult {
         self.start_round();
         let mut tricks = [0usize; 2];
         let mut lead = (self.dealer + 1) % 4;
@@ -289,9 +302,17 @@ impl GameState {
             lead = winner_idx;
         }
         self.dealer = (self.dealer + 1) % 4;
-        let winner = if tricks[0] > tricks[1] { 0 } else { 1 };
-        self.scores[winner] += self.round_points;
-        winner
+        let result = if tricks[0] > tricks[1] {
+            GameResult::Team1Win
+        } else {
+            GameResult::Team2Win
+        };
+        match result {
+            GameResult::Team1Win => self.scores[0] += self.round_points,
+            GameResult::Team2Win => self.scores[1] += self.round_points,
+            _ => {}
+        }
+        result
     }
 }
 
@@ -415,5 +436,21 @@ mod tests {
         for p in &players {
             assert!(p.hand.is_empty());
         }
+    }
+
+    #[test]
+    fn play_hand_by_ids_matches_simulation() {
+        let mut deck = deck();
+        let mut hands = [[DUMMY_CARD; TRICKS_PER_ROUND]; 4];
+        for i in 0..TRICKS_PER_ROUND {
+            for j in 0..4 {
+                hands[j][i] = deck[i * 4 + j];
+            }
+        }
+        let rechte = Card::new(hands[0][0].suit, hands[1][0].rank);
+        let ids = [0usize; 4];
+        let expect = simulate_game(&hands, [[0, 1, 2, 3, 4]; 4], 0, rechte);
+        let result = play_hand(&hands, ids, 0, rechte);
+        assert_eq!(expect, result);
     }
 }
