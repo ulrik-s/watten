@@ -192,9 +192,36 @@ impl GameState {
         panic!("card not found");
     }
 
-    fn best_card_index(&self, p_idx: usize) -> usize {
+    fn is_seeing_player(&self, idx: usize) -> bool {
+        idx == self.dealer || idx == (self.dealer + 1) % 4
+    }
+
+    /// Return the indices that the given player is allowed to play
+    /// when `lead_card` was led. This enforces the rule that seeing
+    /// players must play trump or striker when a trick is started
+    /// with a trump card.
+    pub fn allowed_indices(&self, p_idx: usize, lead_card: Card) -> Vec<usize> {
+        let mut allowed: Vec<usize> = (0..self.players[p_idx].hand.len()).collect();
+        if let Some(rechte) = self.rechte {
+            if lead_card.suit == rechte.suit && self.is_seeing_player(p_idx) {
+                let subset: Vec<usize> = self.players[p_idx]
+                    .hand
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| c.suit == rechte.suit || c.rank == rechte.rank)
+                    .map(|(i, _)| i)
+                    .collect();
+                if !subset.is_empty() {
+                    allowed = subset;
+                }
+            }
+        }
+        allowed
+    }
+
+    fn best_card_index(&self, p_idx: usize, allowed: &[usize]) -> usize {
         let player = &self.players[p_idx];
-        let playable: Vec<usize> = (0..player.hand.len()).collect();
+        let playable: Vec<usize> = allowed.to_vec();
 
         let mut best_idx = playable[0];
         let mut best_rate = -1.0f64;
@@ -262,7 +289,7 @@ impl GameState {
                 let card = if self.players[lead].human {
                     self.players[lead].play_card(&allowed)
                 } else {
-                    let idx = self.best_card_index(lead);
+                    let idx = self.best_card_index(lead, &allowed);
                     self.players[lead].hand.remove(idx)
                 };
                 let orig = self.find_orig_index(lead, card);
@@ -274,11 +301,11 @@ impl GameState {
             let lead_suit = lead_card.suit;
             for offset in 1..4 {
                 let p_idx = (lead + offset) % 4;
-                let allowed: Vec<usize> = (0..self.players[p_idx].hand.len()).collect();
+                let allowed = self.allowed_indices(p_idx, lead_card);
                 let card = if self.players[p_idx].human {
                     self.players[p_idx].play_card(&allowed)
                 } else {
-                    let idx = self.best_card_index(p_idx);
+                    let idx = self.best_card_index(p_idx, &allowed);
                     self.players[p_idx].hand.remove(idx)
                 };
                 let orig = self.find_orig_index(p_idx, card);
@@ -452,5 +479,25 @@ mod tests {
         let expect = simulate_game(&hands, [[0, 1, 2, 3, 4]; 4], 0, rechte);
         let result = play_hand(&hands, ids, 0, rechte);
         assert_eq!(expect, result);
+    }
+
+    #[test]
+    fn allowed_indices_for_seeing_players() {
+        use Suit::*;
+        use Rank::*;
+        let mut g = GameState::new(0);
+        g.dealer = 0;
+        g.rechte = Some(Card::new(Hearts, Unter));
+
+        g.players[0].hand = vec![Card::new(Hearts, Ace), Card::new(Bells, Ober)];
+        g.players[1].hand = vec![Card::new(Leaves, Unter), Card::new(Acorns, Seven)];
+        g.players[2].hand = vec![Card::new(Hearts, Ten)];
+        g.players[3].hand = vec![Card::new(Bells, Ace)];
+
+        let lead = Card::new(Hearts, Ten);
+        let a0 = g.allowed_indices(0, lead.clone());
+        assert_eq!(a0, vec![0]);
+        let a1 = g.allowed_indices(1, lead);
+        assert_eq!(a1, vec![0]);
     }
 }
