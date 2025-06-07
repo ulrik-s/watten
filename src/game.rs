@@ -111,6 +111,8 @@ pub struct GameState {
     pub rechte: Option<Card>,
     pub scores: [usize; 2],
     pub round_points: usize,
+    /// Which team last raised the round points.
+    last_raiser: Option<usize>,
     pub db: Box<dyn GameDatabase>,
     orig_hands: [[Card; TRICKS_PER_ROUND]; 4],
     played: [Vec<usize>; 4],
@@ -133,6 +135,7 @@ impl GameState {
             rechte: None,
             scores: [0, 0],
             round_points: ROUND_POINTS,
+            last_raiser: None,
             db: Box::new(InMemoryGameDatabase::new()),
             orig_hands: [[DUMMY_CARD; TRICKS_PER_ROUND]; 4],
             played: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
@@ -140,6 +143,8 @@ impl GameState {
     }
 
     fn start_round(&mut self) {
+        self.round_points = ROUND_POINTS;
+        self.last_raiser = None;
         let mut cards = deck();
         shuffle(&mut cards);
         for p in self.players.iter_mut() {
@@ -248,6 +253,21 @@ impl GameState {
 
     pub fn striker_rank(&self) -> Option<Rank> {
         self.rechte.map(|c| c.rank)
+    }
+
+    /// Increase the value of the current round by one point on behalf of the
+    /// given team (`0` for team 1, `1` for team 2`). The same team may not
+    /// raise twice in a row. Returns `Ok(())` if the raise was accepted.
+    pub fn raise_round(&mut self, team: usize) -> Result<(), &'static str> {
+        if team > 1 {
+            return Err("invalid team");
+        }
+        if self.last_raiser == Some(team) {
+            return Err("team already raised");
+        }
+        self.round_points += 1;
+        self.last_raiser = Some(team);
+        Ok(())
     }
 
     #[allow(unused_assignments)]
@@ -361,6 +381,21 @@ mod tests {
         assert_eq!(g.scores, [0, 0]);
         assert_eq!(g.round_points, ROUND_POINTS);
     }
+
+    #[test]
+    fn teams_can_raise_alternating() {
+        let mut g = GameState::new(0);
+        assert_eq!(g.round_points, ROUND_POINTS);
+        assert!(g.raise_round(0).is_ok());
+        assert_eq!(g.round_points, ROUND_POINTS + 1);
+        assert!(g.raise_round(0).is_err());
+        assert!(g.raise_round(1).is_ok());
+        assert_eq!(g.round_points, ROUND_POINTS + 2);
+        assert!(g.raise_round(1).is_err());
+        assert!(g.raise_round(0).is_ok());
+        assert_eq!(g.round_points, ROUND_POINTS + 3);
+    }
+
 
     #[test]
     fn play_card_whole_trick_first_striker_wins() {

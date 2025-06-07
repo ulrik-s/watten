@@ -8,6 +8,7 @@ The crate provides:
 - Utilities for enumerating all 120 possible orders in which a 5‑card hand can be played
 - A database API that maps ordered plays of four players to a result (team 1/2 win, not played or rule violation)
 - `GameState::play_round` returns the [`GameResult`] of the round
+- `GameState::raise_round` lets teams increase the current round value
 - `play_hand` plays a round with specific hand IDs and returns the result
 - Functions for computing permutation ranges so partially played games can be matched
 
