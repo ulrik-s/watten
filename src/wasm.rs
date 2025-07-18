@@ -29,6 +29,19 @@ impl WasmGame {
         self.inner.start_round();
     }
 
+    /// Limit the permutation range used for database population. Providing a
+    /// single permutation drastically speeds up simulations and is useful in
+    /// tests.
+    pub fn set_perm_range_single(&mut self, idx: usize) {
+        self.inner.set_perm_range_single(idx);
+    }
+
+    /// Clear any permutation range so that all permutations are considered
+    /// again.
+    pub fn clear_perm_range(&mut self) {
+        self.inner.clear_perm_range();
+    }
+
     pub fn play_round(&mut self) -> u8 {
         self.inner.play_round() as u8
     }

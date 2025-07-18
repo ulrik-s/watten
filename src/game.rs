@@ -145,6 +145,18 @@ impl GameState {
         }
     }
 
+    /// Limit the permutation range used when populating the database. Providing
+    /// a single permutation can dramatically speed up tests.
+    pub fn set_perm_range_single(&mut self, idx: usize) {
+        self.perm_range = Some(vec![idx]);
+    }
+
+    /// Clear any permutation restriction so that all permutations are used
+    /// again when populating the database.
+    pub fn clear_perm_range(&mut self) {
+        self.perm_range = None;
+    }
+
     pub fn start_round(&mut self) {
         self.round_points = ROUND_POINTS;
         self.last_raiser = None;

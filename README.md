@@ -12,9 +12,10 @@ The crate provides:
 - `play_hand` plays a round with specific hand IDs and returns the result
 - Functions for computing permutation ranges so partially played games can be matched
 
-Run tests with `cargo test`. The frontend also has a small
-test suite which can be executed with `npm test` from the
-`frontend` directory.
+Run tests with `cargo test`. Heavier tests that populate the full
+database are ignored by default and can be run with `cargo full`.
+The frontend also has a small test suite which can be executed with
+`npm test` from the `frontend` directory.
 
 ## WebAssembly Frontend
 
