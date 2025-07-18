@@ -27,17 +27,27 @@ interface JsRoundStep {
   while (game.scores()[0] < WINNING && game.scores()[1] < WINNING) {
     console.log(`\n-- Round ${round} --`);
     const [result, steps] = game.play_round_logged() as [number, JsRoundStep[]];
+    const remaining = [5, 5, 5, 5];
     for (const step of steps) {
-      const handStr = step.hand.map(c => `${c.rank} of ${c.suit}`).join(', ');
-      console.log(`Player ${step.player + 1} hand: ${handStr}`);
+      const handStr = step.hand.map((c) => `${c.rank} of ${c.suit}`).join(', ');
+      const allowedStr = step.allowed.join(', ');
+      console.log(
+        `Player ${step.player + 1} hand before play: ${handStr} | allowed indices: [${allowedStr}]`
+      );
       const playedStr = `${step.played.rank} of ${step.played.suit}`;
       console.log(`Player ${step.player + 1} plays ${playedStr}`);
       const idx = step.hand.findIndex(
-        c => c.suit === step.played.suit && c.rank === step.played.rank
+        (c) => c.suit === step.played.suit && c.rank === step.played.rank
       );
       if (!step.allowed.includes(idx)) {
         throw new Error(`Illegal move by player ${step.player + 1}`);
       }
+      if (step.hand.length !== remaining[step.player]) {
+        throw new Error(
+          `Unexpected hand size for player ${step.player + 1}: ${step.hand.length}`
+        );
+      }
+      remaining[step.player]--;
     }
     const scores = game.scores();
     console.log('Scores after round', scores);
