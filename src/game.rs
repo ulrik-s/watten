@@ -116,6 +116,8 @@ pub struct GameState {
     pub db: Box<dyn GameDatabase>,
     orig_hands: [[Card; TRICKS_PER_ROUND]; 4],
     played: [Vec<usize>; 4],
+    /// Optional subset of permutation indices for populating the database
+    perm_range: Option<Vec<usize>>,
 }
 
 impl GameState {
@@ -139,10 +141,11 @@ impl GameState {
             db: Box::new(InMemoryGameDatabase::new()),
             orig_hands: [[DUMMY_CARD; TRICKS_PER_ROUND]; 4],
             played: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
+            perm_range: None,
         }
     }
 
-    fn start_round(&mut self) {
+    pub fn start_round(&mut self) {
         self.round_points = ROUND_POINTS;
         self.last_raiser = None;
         let mut cards = deck();
@@ -175,10 +178,15 @@ impl GameState {
         self.db = Box::new(InMemoryGameDatabase::new());
         let perms = all_hand_orders();
         let rechte = self.rechte.unwrap();
-        for i1 in 0..perms.len() {
-            for i2 in 0..perms.len() {
-                for i3 in 0..perms.len() {
-                    for i4 in 0..perms.len() {
+        let indices: Vec<usize> = if let Some(ref r) = self.perm_range {
+            r.clone()
+        } else {
+            (0..perms.len()).collect()
+        };
+        for &i1 in &indices {
+            for &i2 in &indices {
+                for &i3 in &indices {
+                    for &i4 in &indices {
                         let result =
                             play_hand(&self.orig_hands, [i1, i2, i3, i4], self.dealer, rechte);
                         self.db.set(i1, i2, i3, i4, result);
@@ -274,6 +282,50 @@ impl GameState {
         best_idx
     }
 
+    fn card_win_rate(&self, p_idx: usize, hand_idx: usize) -> f64 {
+        let player = &self.players[p_idx];
+        let card = player.hand[hand_idx];
+        let orig = self.find_orig_index(p_idx, card);
+        let mut ranges: [std::ops::Range<usize>; 4] = std::array::from_fn(|_| 0..HAND_PERMUTATIONS);
+        for i in 0..4 {
+            let mut prefix = self.played[i].clone();
+            if i == p_idx {
+                prefix.push(orig);
+            }
+            let (s, e) = perm_prefix_range(&prefix);
+            ranges[i] = s..e;
+        }
+        let counts = self.db.counts_in_ranges(
+            ranges[0].clone(),
+            ranges[1].clone(),
+            ranges[2].clone(),
+            ranges[3].clone(),
+        );
+        let team = p_idx % 2;
+        let wins = counts[if team == 0 {
+            GameResult::Team1Win as usize
+        } else {
+            GameResult::Team2Win as usize
+        }];
+        let losses = counts[if team == 0 {
+            GameResult::Team2Win as usize
+        } else {
+            GameResult::Team1Win as usize
+        }];
+        let total = wins + losses;
+        if total == 0 {
+            0.0
+        } else {
+            wins as f64 / total as f64
+        }
+    }
+
+    fn win_rates_for_player(&self, p_idx: usize) -> Vec<f64> {
+        (0..self.players[p_idx].hand.len())
+            .map(|i| self.card_win_rate(p_idx, i))
+            .collect()
+    }
+
     pub fn trump_suit(&self) -> Option<Suit> {
         self.rechte.map(|c| c.suit)
     }
@@ -307,7 +359,8 @@ impl GameState {
             let lead_card = {
                 let allowed: Vec<usize> = (0..self.players[lead].hand.len()).collect();
                 let card = if self.players[lead].human {
-                    self.players[lead].play_card(&allowed)
+                    let rates = self.win_rates_for_player(lead);
+                    self.players[lead].play_card(&allowed, Some(&rates))
                 } else {
                     let idx = self.best_card_index(lead, &allowed);
                     self.players[lead].hand.remove(idx)
@@ -323,7 +376,8 @@ impl GameState {
                 let p_idx = (lead + offset) % 4;
                 let allowed = self.allowed_indices(p_idx, lead_card);
                 let card = if self.players[p_idx].human {
-                    self.players[p_idx].play_card(&allowed)
+                    let rates = self.win_rates_for_player(p_idx);
+                    self.players[p_idx].play_card(&allowed, Some(&rates))
                 } else {
                     let idx = self.best_card_index(p_idx, &allowed);
                     self.players[p_idx].hand.remove(idx)
@@ -423,7 +477,6 @@ mod tests {
         assert_eq!(g.round_points, ROUND_POINTS + 3);
     }
 
-
     #[test]
     fn play_card_whole_trick_first_striker_wins() {
         let rechte = Card::new(Suit::Hearts, Rank::Unter);
@@ -438,12 +491,12 @@ mod tests {
         players[2].hand.push(Card::new(Suit::Hearts, Rank::Ace));
         players[3].hand.push(Card::new(Suit::Acorns, Rank::Ace));
 
-        let lead_card = players[0].play_card(&[0]);
+        let lead_card = players[0].play_card(&[0], None);
         let lead_suit = lead_card.suit;
         let mut cards = vec![lead_card];
         for i in 1..4 {
             let allowed: Vec<usize> = (0..players[i].hand.len()).collect();
-            cards.push(players[i].play_card(&allowed));
+            cards.push(players[i].play_card(&allowed, None));
         }
 
         let mut best_idx = 0usize;
@@ -476,12 +529,12 @@ mod tests {
         players[2].hand.push(Card::new(Suit::Hearts, Rank::Nine));
         players[3].hand.push(rechte); // hearts unter
 
-        let lead_card = players[0].play_card(&[0]);
+        let lead_card = players[0].play_card(&[0], None);
         let lead_suit = lead_card.suit;
         let mut cards = vec![lead_card];
         for i in 1..4 {
             let allowed: Vec<usize> = (0..players[i].hand.len()).collect();
-            cards.push(players[i].play_card(&allowed));
+            cards.push(players[i].play_card(&allowed, None));
         }
 
         let mut best_idx = 0usize;
@@ -518,8 +571,8 @@ mod tests {
 
     #[test]
     fn allowed_indices_for_seeing_players() {
-        use Suit::*;
         use Rank::*;
+        use Suit::*;
         let mut g = GameState::new(0);
         g.dealer = 0;
         g.rechte = Some(Card::new(Hearts, Unter));
@@ -534,5 +587,104 @@ mod tests {
         assert_eq!(a0, vec![0]);
         let a1 = g.allowed_indices(1, lead);
         assert_eq!(a1, vec![0]);
+    }
+
+    #[test]
+    fn start_round_populates_database() {
+        let mut g = GameState::new(0);
+        g.perm_range = Some(vec![0]);
+        g.start_round();
+        // database should contain at least the entry for all-zero permutations
+        assert!(g.db.get(0, 0, 0, 0) != GameResult::NotPlayed);
+    }
+
+    #[test]
+    fn best_card_uses_database() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        struct DummyDB {
+            calls: Rc<RefCell<u32>>,
+        }
+
+        impl GameDatabase for DummyDB {
+            fn set(&mut self, _p1: usize, _p2: usize, _p3: usize, _p4: usize, _r: GameResult) {}
+            fn get(&self, _p1: usize, _p2: usize, _p3: usize, _p4: usize) -> GameResult {
+                GameResult::NotPlayed
+            }
+            fn counts_in_ranges(
+                &self,
+                _p1: std::ops::Range<usize>,
+                _p2: std::ops::Range<usize>,
+                _p3: std::ops::Range<usize>,
+                _p4: std::ops::Range<usize>,
+            ) -> [u32; 4] {
+                let mut c = self.calls.borrow_mut();
+                let result = if *c == 0 {
+                    [0, 10, 0, 0]
+                } else {
+                    [0, 0, 10, 0]
+                };
+                *c += 1;
+                result
+            }
+        }
+
+        let counter = Rc::new(RefCell::new(0));
+        let mut g = GameState::new(0);
+        g.db = Box::new(DummyDB {
+            calls: counter.clone(),
+        });
+
+        g.players[0].hand = vec![
+            Card::new(Suit::Hearts, Rank::Seven),
+            Card::new(Suit::Bells, Rank::Ace),
+        ];
+        g.orig_hands[0][0] = g.players[0].hand[0];
+        g.orig_hands[0][1] = g.players[0].hand[1];
+
+        let idx = g.best_card_index(0, &[0, 1]);
+        assert_eq!(idx, 0);
+        assert!(*counter.borrow() >= 2);
+    }
+
+    #[test]
+    fn card_win_rate_uses_database() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        struct DummyDB {
+            calls: Rc<RefCell<u32>>,
+        }
+
+        impl GameDatabase for DummyDB {
+            fn set(&mut self, _p1: usize, _p2: usize, _p3: usize, _p4: usize, _r: GameResult) {}
+            fn get(&self, _p1: usize, _p2: usize, _p3: usize, _p4: usize) -> GameResult {
+                GameResult::NotPlayed
+            }
+            fn counts_in_ranges(
+                &self,
+                _p1: std::ops::Range<usize>,
+                _p2: std::ops::Range<usize>,
+                _p3: std::ops::Range<usize>,
+                _p4: std::ops::Range<usize>,
+            ) -> [u32; 4] {
+                *self.calls.borrow_mut() += 1;
+                [0, 5, 10, 0]
+            }
+        }
+
+        let counter = Rc::new(RefCell::new(0));
+        let mut g = GameState::new(0);
+        g.db = Box::new(DummyDB {
+            calls: counter.clone(),
+        });
+
+        g.players[0].hand = vec![Card::new(Suit::Hearts, Rank::Seven)];
+        g.orig_hands[0][0] = g.players[0].hand[0];
+
+        let rate = g.card_win_rate(0, 0);
+        assert!(*counter.borrow() > 0);
+        assert!((rate - 0.3333).abs() < 1e-4);
     }
 }
