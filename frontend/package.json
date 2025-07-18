@@ -8,7 +8,7 @@
     "start": "npm run build:wasm && vite",
     "build": "npm run build:wasm && vite build",
     "serve": "vite preview",
-    "test": "npm run build:wasm:test && node test.js"
+    "test": "npm run build:wasm:test && node test.js && node test_full_game.js"
   },
   "dependencies": {
     "react": "^18.2.0",

@@ -14,3 +14,6 @@ getrandom = { version = "0.2", features = ["js"] }
 
 [lib]
 crate-type = ["rlib", "cdylib"]
+
+[alias]
+full = "test -- --ignored"
