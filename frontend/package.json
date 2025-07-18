@@ -1,0 +1,22 @@
+{
+  "name": "watten-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build:wasm": "wasm-pack build --target web",
+    "build:wasm:test": "wasm-pack build --target web --out-dir pkg-test --no-opt",
+    "start": "npm run build:wasm && vite",
+    "build": "npm run build:wasm && vite build",
+    "serve": "vite preview",
+    "test": "npm run build:wasm:test && node test.js"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

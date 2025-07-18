@@ -12,4 +12,52 @@ The crate provides:
 - `play_hand` plays a round with specific hand IDs and returns the result
 - Functions for computing permutation ranges so partially played games can be matched
 
-Run tests with `cargo test`.
+Run tests with `cargo test`. The frontend also has a small
+test suite which can be executed with `npm test` from the
+`frontend` directory.
+
+## WebAssembly Frontend
+
+The crate can be compiled to WebAssembly and consumed by a small React
+application.  You will need the [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)
+tool and a recent Node.js installation.
+
+### Building and running
+
+1. Compile the Rust code to WebAssembly from the repository root:
+
+   ```bash
+   npm --prefix frontend run build:wasm
+   ```
+
+   This invokes `wasm-pack build --target web` and outputs a `pkg/` directory.
+
+2. Install JavaScript dependencies and start the development server:
+
+   ```bash
+   cd frontend
+   npm install
+   npm start
+   ```
+
+   Open `http://localhost:5173` in your browser.
+
+3. To create a production build run:
+
+   ```bash
+   npm run build
+   ```
+
+   You can then open `dist/index.html` directly or run `npm run serve` to preview
+   it.
+
+4. To run the frontend tests:
+
+   ```bash
+   npm test
+   ```
+
+   This builds the WebAssembly with `wasm-pack` and runs a small Node.js
+   script that loads the module and verifies it can start a round.
+
+`yarn` or `pnpm` can be used instead of `npm` if preferred.

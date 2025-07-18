@@ -1,7 +1,11 @@
 use watten::game::{card_strength, GameState};
 use watten::{Card, Rank, Suit};
 
-fn manual_round(hands: &mut [Vec<Card>; 4], dealer: usize, rechte: Card) -> (Vec<usize>, [usize; 2]) {
+fn manual_round(
+    hands: &mut [Vec<Card>; 4],
+    dealer: usize,
+    rechte: Card,
+) -> (Vec<usize>, [usize; 2]) {
     let mut lead = (dealer + 1) % 4;
     let mut winners = Vec::new();
     let mut tricks = [0usize; 2];
@@ -37,10 +41,34 @@ fn raising_points_and_full_round() {
     use Suit::*;
     let rechte = Card::new(Hearts, Unter);
     let original_hands = [
-        vec![Card::new(Hearts, Unter), Card::new(Bells, Ace), Card::new(Leaves, King), Card::new(Hearts, Ace), Card::new(Acorns, Ten)],
-        vec![Card::new(Hearts, Ten), Card::new(Bells, King), Card::new(Leaves, Ace), Card::new(Bells, Seven), Card::new(Acorns, Nine)],
-        vec![Card::new(Hearts, King), Card::new(Leaves, Ober), Card::new(Bells, Nine), Card::new(Hearts, Nine), Card::new(Acorns, Unter)],
-        vec![Card::new(Hearts, Ober), Card::new(Bells, Unter), Card::new(Leaves, Nine), Card::new(Acorns, Ace), Card::new(Bells, Ten)],
+        vec![
+            Card::new(Hearts, Unter),
+            Card::new(Bells, Ace),
+            Card::new(Leaves, King),
+            Card::new(Hearts, Ace),
+            Card::new(Acorns, Ten),
+        ],
+        vec![
+            Card::new(Hearts, Ten),
+            Card::new(Bells, King),
+            Card::new(Leaves, Ace),
+            Card::new(Bells, Seven),
+            Card::new(Acorns, Nine),
+        ],
+        vec![
+            Card::new(Hearts, King),
+            Card::new(Leaves, Ober),
+            Card::new(Bells, Nine),
+            Card::new(Hearts, Nine),
+            Card::new(Acorns, Unter),
+        ],
+        vec![
+            Card::new(Hearts, Ober),
+            Card::new(Bells, Unter),
+            Card::new(Leaves, Nine),
+            Card::new(Acorns, Ace),
+            Card::new(Bells, Ten),
+        ],
     ];
     let mut g = GameState::new(0);
     g.dealer = 0;
@@ -56,7 +84,11 @@ fn raising_points_and_full_round() {
     let mut hands = original_hands.clone();
     let (winners, tricks) = manual_round(&mut hands, g.dealer, rechte);
     assert_eq!(winners.len(), watten::game::TRICKS_PER_ROUND);
-    let result = if tricks[0] > tricks[1] { watten::GameResult::Team1Win } else { watten::GameResult::Team2Win };
+    let result = if tricks[0] > tricks[1] {
+        watten::GameResult::Team1Win
+    } else {
+        watten::GameResult::Team2Win
+    };
     match result {
         watten::GameResult::Team1Win => g.scores[0] += g.round_points,
         watten::GameResult::Team2Win => g.scores[1] += g.round_points,
