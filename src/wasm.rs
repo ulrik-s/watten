@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen as swb;
 use wasm_bindgen::prelude::*;
 
-use crate::game::GameState;
+use crate::game::{GameState, RoundStep};
 use crate::{Card, GameResult, Rank, Suit};
 
 #[wasm_bindgen]
@@ -14,6 +14,14 @@ pub struct WasmGame {
 pub struct JsCard {
     suit: Suit,
     rank: Rank,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct JsRoundStep {
+    player: usize,
+    hand: Vec<JsCard>,
+    allowed: Vec<usize>,
+    played: JsCard,
 }
 
 #[wasm_bindgen]
@@ -68,5 +76,29 @@ impl WasmGame {
             })
             .collect();
         swb::to_value(&cards).unwrap()
+    }
+
+    pub fn play_round_logged(&mut self) -> JsValue {
+        let (result, steps) = self.inner.play_round_logged();
+        let js_steps: Vec<JsRoundStep> = steps
+            .into_iter()
+            .map(|s| JsRoundStep {
+                player: s.player,
+                hand: s
+                    .hand
+                    .iter()
+                    .map(|c| JsCard {
+                        suit: c.suit,
+                        rank: c.rank,
+                    })
+                    .collect(),
+                allowed: s.allowed,
+                played: JsCard {
+                    suit: s.played.suit,
+                    rank: s.played.rank,
+                },
+            })
+            .collect();
+        swb::to_value(&(result as u8, js_steps)).unwrap()
     }
 }

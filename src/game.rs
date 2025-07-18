@@ -4,6 +4,7 @@ use crate::{
     all_hand_orders, deck, perm_prefix_range, shuffle, Card, GameResult, Rank, Suit,
     HAND_PERMUTATIONS,
 };
+use serde::Serialize;
 
 pub const WINNING_POINTS: usize = 13;
 pub const ROUND_POINTS: usize = 2;
@@ -103,6 +104,14 @@ pub fn play_hand(
         perms[hand_ids[3]],
     ];
     simulate_game(hands, orders, dealer, rechte)
+}
+
+#[derive(Clone, Serialize)]
+pub struct RoundStep {
+    pub player: usize,
+    pub hand: Vec<Card>,
+    pub allowed: Vec<usize>,
+    pub played: Card,
 }
 
 pub struct GameState {
@@ -426,6 +435,85 @@ impl GameState {
             _ => {}
         }
         result
+    }
+
+    #[allow(unused_assignments)]
+    pub fn play_round_logged(&mut self) -> (GameResult, Vec<RoundStep>) {
+        self.start_round();
+        let mut log = Vec::new();
+        let mut tricks = [0usize; 2];
+        let mut lead = (self.dealer + 1) % 4;
+        for _ in 0..TRICKS_PER_ROUND {
+            let mut played: Vec<(usize, Card)> = Vec::new();
+            let lead_allowed: Vec<usize> = (0..self.players[lead].hand.len()).collect();
+            let lead_hand = self.players[lead].hand.clone();
+            let lead_card = {
+                let card = if self.players[lead].human {
+                    let rates = self.win_rates_for_player(lead);
+                    self.players[lead].play_card(&lead_allowed, Some(&rates))
+                } else {
+                    let idx = self.best_card_index(lead, &lead_allowed);
+                    self.players[lead].hand.remove(idx)
+                };
+                let orig = self.find_orig_index(lead, card);
+                self.played[lead].push(orig);
+                log.push(RoundStep {
+                    player: lead,
+                    hand: lead_hand,
+                    allowed: lead_allowed.clone(),
+                    played: card,
+                });
+                played.push((lead, card));
+                card
+            };
+            let lead_suit = lead_card.suit;
+            for offset in 1..4 {
+                let p_idx = (lead + offset) % 4;
+                let allowed = self.allowed_indices(p_idx, lead_card);
+                let hand_before = self.players[p_idx].hand.clone();
+                let card = if self.players[p_idx].human {
+                    let rates = self.win_rates_for_player(p_idx);
+                    self.players[p_idx].play_card(&allowed, Some(&rates))
+                } else {
+                    let idx = self.best_card_index(p_idx, &allowed);
+                    self.players[p_idx].hand.remove(idx)
+                };
+                let orig = self.find_orig_index(p_idx, card);
+                self.played[p_idx].push(orig);
+                log.push(RoundStep {
+                    player: p_idx,
+                    hand: hand_before,
+                    allowed: allowed.clone(),
+                    played: card,
+                });
+                played.push((p_idx, card));
+            }
+            let rechte = self.rechte.unwrap();
+            let mut best = (played[0].0, played[0].1, 0usize);
+            let mut best_score = card_strength(&best.1, lead_suit, rechte, 0);
+            for (pos, &(idx, ref card)) in played.iter().enumerate().skip(1) {
+                let val = card_strength(card, lead_suit, rechte, pos);
+                if val > best_score {
+                    best = (idx, *card, pos);
+                    best_score = val;
+                }
+            }
+            let (winner_idx, _, _) = best;
+            tricks[winner_idx % 2] += 1;
+            lead = winner_idx;
+        }
+        self.dealer = (self.dealer + 1) % 4;
+        let result = if tricks[0] > tricks[1] {
+            GameResult::Team1Win
+        } else {
+            GameResult::Team2Win
+        };
+        match result {
+            GameResult::Team1Win => self.scores[0] += self.round_points,
+            GameResult::Team2Win => self.scores[1] += self.round_points,
+            _ => {}
+        }
+        (result, log)
     }
 }
 

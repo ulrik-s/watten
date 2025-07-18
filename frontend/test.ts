@@ -1,12 +1,11 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 (async () => {
   const wasm = await import('../pkg-test/watten.js');
-  const bytes = fs.readFileSync(
-    path.join(__dirname, '..', 'pkg-test', 'watten_bg.wasm')
-  );
-  wasm.initSync(bytes.buffer);
   const game = new wasm.WasmGame(0);
   if (game.scores().length !== 2) {
     throw new Error('Unexpected scores length');
