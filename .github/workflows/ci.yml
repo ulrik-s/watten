@@ -13,7 +13,7 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: '18'
-      - uses: actions/setup-rust@v1
+      - uses: actions-rs/toolchain@v1
         with:
           rust-version: stable
       - name: Install wasm-pack
