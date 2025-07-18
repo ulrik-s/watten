@@ -61,4 +61,13 @@ tool and a recent Node.js installation.
    This builds the WebAssembly with `wasm-pack` and runs a small Node.js
    script that loads the module and verifies it can start a round.
 
+5. To run the heavy database tests together with the frontend tests:
+
+   ```bash
+   npm run full-test
+   ```
+
+   This invokes `cargo full` to execute the ignored Rust tests that populate
+   the full database and then runs the TypeScript tests.
+
 `yarn` or `pnpm` can be used instead of `npm` if preferred.
