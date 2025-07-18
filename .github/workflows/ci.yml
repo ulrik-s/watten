@@ -15,7 +15,9 @@ jobs:
           node-version: '18'
       - uses: actions-rs/toolchain@v1
         with:
-          rust-version: stable
+            toolchain: stable
+            override: true
+            components: rustfmt, clippy
       - name: Install wasm-pack
         run: |
           curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
