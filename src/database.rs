@@ -18,13 +18,7 @@ pub trait GameDatabase {
     /// Count results over explicit lists of permutation indices. This allows
     /// callers to restrict iteration to a subset of permutations rather than a
     /// contiguous range.
-    fn counts_in_lists(
-        &self,
-        p1: &[usize],
-        p2: &[usize],
-        p3: &[usize],
-        p4: &[usize],
-    ) -> [u32; 4];
+    fn counts_in_lists(&self, p1: &[usize], p2: &[usize], p3: &[usize], p4: &[usize]) -> [u32; 4];
 }
 
 /// In-memory implementation of [`GameDatabase`].
@@ -76,13 +70,7 @@ impl GameDatabase for InMemoryGameDatabase {
         counts
     }
 
-    fn counts_in_lists(
-        &self,
-        p1: &[usize],
-        p2: &[usize],
-        p3: &[usize],
-        p4: &[usize],
-    ) -> [u32; 4] {
+    fn counts_in_lists(&self, p1: &[usize], p2: &[usize], p3: &[usize], p4: &[usize]) -> [u32; 4] {
         let mut counts = [0u32; 4];
         for &i1 in p1 {
             for &i2 in p2 {

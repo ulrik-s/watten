@@ -279,12 +279,9 @@ impl GameState {
                     lists[i] = (s..e).collect();
                 }
             }
-            let counts = self.db.counts_in_lists(
-                &lists[0],
-                &lists[1],
-                &lists[2],
-                &lists[3],
-            );
+            let counts = self
+                .db
+                .counts_in_lists(&lists[0], &lists[1], &lists[2], &lists[3]);
             let team = p_idx % 2;
             let wins = counts[if team == 0 {
                 GameResult::Team1Win as usize
@@ -331,12 +328,9 @@ impl GameState {
                 lists[i] = (s..e).collect();
             }
         }
-        let counts = self.db.counts_in_lists(
-            &lists[0],
-            &lists[1],
-            &lists[2],
-            &lists[3],
-        );
+        let counts = self
+            .db
+            .counts_in_lists(&lists[0], &lists[1], &lists[2], &lists[3]);
         let team = p_idx % 2;
         let wins = counts[if team == 0 {
             GameResult::Team1Win as usize
