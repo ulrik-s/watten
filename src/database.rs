@@ -14,6 +14,17 @@ pub trait GameDatabase {
         p3: Range<usize>,
         p4: Range<usize>,
     ) -> [u32; 4];
+
+    /// Count results over explicit lists of permutation indices. This allows
+    /// callers to restrict iteration to a subset of permutations rather than a
+    /// contiguous range.
+    fn counts_in_lists(
+        &self,
+        p1: &[usize],
+        p2: &[usize],
+        p3: &[usize],
+        p4: &[usize],
+    ) -> [u32; 4];
 }
 
 /// In-memory implementation of [`GameDatabase`].
@@ -64,6 +75,27 @@ impl GameDatabase for InMemoryGameDatabase {
         }
         counts
     }
+
+    fn counts_in_lists(
+        &self,
+        p1: &[usize],
+        p2: &[usize],
+        p3: &[usize],
+        p4: &[usize],
+    ) -> [u32; 4] {
+        let mut counts = [0u32; 4];
+        for &i1 in p1 {
+            for &i2 in p2 {
+                for &i3 in p3 {
+                    for &i4 in p4 {
+                        let r = self.get(i1, i2, i3, i4) as usize;
+                        counts[r] += 1;
+                    }
+                }
+            }
+        }
+        counts
+    }
 }
 
 #[cfg(test)]
@@ -75,6 +107,15 @@ mod tests {
         let mut db = InMemoryGameDatabase::new();
         db.set(0, 0, 0, 0, GameResult::Team1Win);
         let counts = db.counts_in_ranges(0..1, 0..1, 0..1, 0..1);
+        assert_eq!(counts[GameResult::Team1Win as usize], 1);
+        assert_eq!(counts[GameResult::NotPlayed as usize], 0);
+    }
+
+    #[test]
+    fn counts_over_lists() {
+        let mut db = InMemoryGameDatabase::new();
+        db.set(0, 0, 0, 0, GameResult::Team1Win);
+        let counts = db.counts_in_lists(&[0], &[0], &[0], &[0]);
         assert_eq!(counts[GameResult::Team1Win as usize], 1);
         assert_eq!(counts[GameResult::NotPlayed as usize], 0);
     }
