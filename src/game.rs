@@ -262,22 +262,26 @@ impl GameState {
         for &idx in &playable {
             let card = player.hand[idx];
             let orig = self.find_orig_index(p_idx, card);
-            let mut ranges: [std::ops::Range<usize>; 4] =
-                std::array::from_fn(|_| 0..HAND_PERMUTATIONS);
+            let mut lists: [Vec<usize>; 4] = std::array::from_fn(|_| Vec::new());
             for i in 0..4 {
                 let mut prefix = self.played[i].clone();
                 if i == p_idx {
                     prefix.push(orig);
                 }
                 let (s, e) = perm_prefix_range(&prefix);
-                ranges[i] = s..e;
+                if let Some(ref allowed_indices) = self.perm_range {
+                    lists[i] = allowed_indices
+                        .iter()
+                        .cloned()
+                        .filter(|&v| v >= s && v < e)
+                        .collect();
+                } else {
+                    lists[i] = (s..e).collect();
+                }
             }
-            let counts = self.db.counts_in_ranges(
-                ranges[0].clone(),
-                ranges[1].clone(),
-                ranges[2].clone(),
-                ranges[3].clone(),
-            );
+            let counts = self
+                .db
+                .counts_in_lists(&lists[0], &lists[1], &lists[2], &lists[3]);
             let team = p_idx % 2;
             let wins = counts[if team == 0 {
                 GameResult::Team1Win as usize
@@ -307,21 +311,26 @@ impl GameState {
         let player = &self.players[p_idx];
         let card = player.hand[hand_idx];
         let orig = self.find_orig_index(p_idx, card);
-        let mut ranges: [std::ops::Range<usize>; 4] = std::array::from_fn(|_| 0..HAND_PERMUTATIONS);
+        let mut lists: [Vec<usize>; 4] = std::array::from_fn(|_| Vec::new());
         for i in 0..4 {
             let mut prefix = self.played[i].clone();
             if i == p_idx {
                 prefix.push(orig);
             }
             let (s, e) = perm_prefix_range(&prefix);
-            ranges[i] = s..e;
+            if let Some(ref allowed_indices) = self.perm_range {
+                lists[i] = allowed_indices
+                    .iter()
+                    .cloned()
+                    .filter(|&v| v >= s && v < e)
+                    .collect();
+            } else {
+                lists[i] = (s..e).collect();
+            }
         }
-        let counts = self.db.counts_in_ranges(
-            ranges[0].clone(),
-            ranges[1].clone(),
-            ranges[2].clone(),
-            ranges[3].clone(),
-        );
+        let counts = self
+            .db
+            .counts_in_lists(&lists[0], &lists[1], &lists[2], &lists[3]);
         let team = p_idx % 2;
         let wins = counts[if team == 0 {
             GameResult::Team1Win as usize
@@ -728,6 +737,16 @@ mod tests {
                 *c += 1;
                 result
             }
+
+            fn counts_in_lists(
+                &self,
+                _p1: &[usize],
+                _p2: &[usize],
+                _p3: &[usize],
+                _p4: &[usize],
+            ) -> [u32; 4] {
+                self.counts_in_ranges(0..0, 0..0, 0..0, 0..0)
+            }
         }
 
         let counter = Rc::new(RefCell::new(0));
@@ -771,6 +790,16 @@ mod tests {
             ) -> [u32; 4] {
                 *self.calls.borrow_mut() += 1;
                 [0, 5, 10, 0]
+            }
+
+            fn counts_in_lists(
+                &self,
+                _p1: &[usize],
+                _p2: &[usize],
+                _p3: &[usize],
+                _p4: &[usize],
+            ) -> [u32; 4] {
+                self.counts_in_ranges(0..0, 0..0, 0..0, 0..0)
             }
         }
 
