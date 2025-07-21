@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const baseURL = 'file://' + path.resolve(__dirname, 'dist/index.html');
+const baseURL = 'http://localhost:4177';
 
 // Basic sanity check that the built UI loads
 // and renders the game title.
