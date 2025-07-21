@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import init, { WasmGame } from '../../pkg/watten';
+import init, { WasmGame } from '../pkg/watten';
 import './table.css';
 import { CardView } from './Card';
 

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:wasm": "wasm-pack build --target web",
+    "build:wasm": "wasm-pack build --target web --out-dir frontend/pkg",
     "build:wasm:test": "wasm-pack build --target nodejs --out-dir pkg-test --dev",
     "start": "npm run build:wasm && vite",
     "build": "npm run build:wasm && vite build",
