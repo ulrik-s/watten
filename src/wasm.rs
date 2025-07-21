@@ -37,6 +37,10 @@ impl WasmGame {
         self.inner.start_round();
     }
 
+    pub fn start_round_interactive(&mut self) {
+        self.inner.start_round_interactive();
+    }
+
     /// Limit the permutation range used for database population. Providing a
     /// single permutation drastically speeds up simulations and is useful in
     /// tests.
@@ -100,5 +104,37 @@ impl WasmGame {
             })
             .collect();
         swb::to_value(&(result as u8, js_steps)).unwrap()
+    }
+
+    pub fn advance_bots(&mut self) -> JsValue {
+        let (res, steps) = self.inner.advance_bots();
+        let js_steps: Vec<JsRoundStep> = steps
+            .into_iter()
+            .map(|s| JsRoundStep {
+                player: s.player,
+                hand: s.hand.iter().map(|c| JsCard { suit: c.suit, rank: c.rank }).collect(),
+                allowed: s.allowed,
+                played: JsCard { suit: s.played.suit, rank: s.played.rank },
+            })
+            .collect();
+        swb::to_value(&(res.map(|r| r as u8), js_steps)).unwrap()
+    }
+
+    pub fn human_allowed_indices(&self) -> JsValue {
+        swb::to_value(&self.inner.human_allowed_indices()).unwrap()
+    }
+
+    pub fn human_play(&mut self, idx: usize) -> JsValue {
+        let (res, steps) = self.inner.human_play(idx);
+        let js_steps: Vec<JsRoundStep> = steps
+            .into_iter()
+            .map(|s| JsRoundStep {
+                player: s.player,
+                hand: s.hand.iter().map(|c| JsCard { suit: c.suit, rank: c.rank }).collect(),
+                allowed: s.allowed,
+                played: JsCard { suit: s.played.suit, rank: s.played.rank },
+            })
+            .collect();
+        swb::to_value(&(res.map(|r| r as u8), js_steps)).unwrap()
     }
 }

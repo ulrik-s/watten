@@ -1,3 +1,6 @@
 /target
 frontend/pkg
 frontend/pkg-test
+frontend/node_modules
+frontend/dist
+frontend/test-results

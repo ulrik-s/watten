@@ -1,17 +1,128 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import init, { WasmGame } from '../../pkg/watten';
+import './table.css';
+import { CardView } from './Card';
 
-async function main() {
-  await init();
-  const game = new WasmGame(0);
-  game.start_round();
-  console.log('Trump:', game.trump_suit());
-  console.log('Striker:', game.striker_rank());
-  console.log('Player 1 hand:', game.hand(0));
+interface JsCard {
+  suit: string;
+  rank: string;
 }
 
-main();
+interface JsRoundStep {
+  player: number;
+  hand: JsCard[];
+  allowed: number[];
+  played: JsCard;
+}
+
+const App = () => {
+  const [game, setGame] = useState<WasmGame | null>(null);
+  const [hand, setHand] = useState<JsCard[]>([]);
+  const [allowed, setAllowed] = useState<number[]>([]);
+  const [log, setLog] = useState<string[]>([]);
+  const [trick, setTrick] = useState<JsCard[]>([]);
+  const [scores, setScores] = useState<[number, number]>([0, 0]);
+  const [trump, setTrump] = useState<string | null>(null);
+  const [striker, setStriker] = useState<string | null>(null);
+
+  useEffect(() => {
+    init().then(() => {
+      const g = new WasmGame(1);
+      g.start_round_interactive();
+      setGame(g);
+      setTrump(g.trump_suit());
+      setStriker(g.striker_rank());
+      const [res, steps] = g.advance_bots() as [number | null, JsRoundStep[]];
+      handleSteps(steps);
+      updateHand(g);
+    });
+  }, []);
+
+  function handleSteps(steps: JsRoundStep[]) {
+    const lines = steps.map(
+      (s) => `Player ${s.player + 1} plays ${s.played.rank} of ${s.played.suit}`
+    );
+    setLog((prev) => [...prev, ...lines]);
+    setTrick((prev) => {
+      const next = [...prev, ...steps.map((s) => s.played)];
+      return next.slice(next.length - 4);
+    });
+  }
+
+  function updateHand(g: WasmGame) {
+    setHand(g.hand(0) as JsCard[]);
+    setAllowed(g.human_allowed_indices() as number[]);
+    setScores(g.scores() as [number, number]);
+  }
+
+  function play(idx: number) {
+    if (!game) return;
+    const [res, steps] = game.human_play(idx) as [number | null, JsRoundStep[]];
+    handleSteps(steps);
+    updateHand(game);
+    if (res !== null) {
+      if (game.scores()[0] < 13 && game.scores()[1] < 13) {
+        game.start_round_interactive();
+        setTrump(game.trump_suit());
+        setStriker(game.striker_rank());
+        const [_, st] = game.advance_bots() as [number | null, JsRoundStep[]];
+        handleSteps(st);
+        updateHand(game);
+      } else {
+        setLog((prev) => [...prev, 'Game Over']);
+      }
+    }
+  }
+
+  return (
+    <div>
+      <h1>Watten</h1>
+      <p>Trump: {trump}</p>
+      <p>Striker: {striker}</p>
+      <p>Scores: {scores[0]} - {scores[1]}</p>
+      <div className="table">
+        <div className="player p2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <CardView key={i} suit="Hearts" rank="" faceDown />
+          ))}
+        </div>
+        <div className="player p3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <CardView key={i} suit="Hearts" rank="" faceDown />
+          ))}
+        </div>
+        <div className="player p4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <CardView key={i} suit="Hearts" rank="" faceDown />
+          ))}
+        </div>
+        <div className="center">
+          {trick.map((c, i) => (
+            <CardView key={i} suit={c.suit} rank={c.rank} />
+          ))}
+        </div>
+        <div className="player hand">
+          {hand.map((c, i) => (
+            <CardView
+              key={i}
+              suit={c.suit}
+              rank={c.rank}
+              selectable={allowed.includes(i)}
+              onClick={() => play(i)}
+            />
+          ))}
+        </div>
+      </div>
+      <div>
+        {log.map((l, i) => (
+          <div key={i}>{l}</div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 const root = createRoot(document.getElementById('root')!);
-root.render(<h1>Watten</h1>);
+root.render(<App />);
+
