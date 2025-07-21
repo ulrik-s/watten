@@ -663,11 +663,14 @@ impl GameState {
                 return (Some(res), log);
             }
         } else {
-            return (Some(if self.tricks_won[0] > self.tricks_won[1] {
-                GameResult::Team1Win
-            } else {
-                GameResult::Team2Win
-            }), log);
+            return (
+                Some(if self.tricks_won[0] > self.tricks_won[1] {
+                    GameResult::Team1Win
+                } else {
+                    GameResult::Team2Win
+                }),
+                log,
+            );
         }
         (None, log)
     }
