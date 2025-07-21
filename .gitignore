@@ -4,3 +4,4 @@ frontend/pkg-test
 frontend/node_modules
 frontend/dist
 frontend/test-results
+node_modules
