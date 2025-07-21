@@ -6,6 +6,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   testDir: __dirname,
+  projects: [
+    {
+      name: 'firefox',
+      use: { browserName: 'firefox' },
+    },
+  ],
   webServer: {
     command: 'npx --yes http-server dist -p 4177',
     port: 4177,

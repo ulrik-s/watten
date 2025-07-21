@@ -112,9 +112,19 @@ impl WasmGame {
             .into_iter()
             .map(|s| JsRoundStep {
                 player: s.player,
-                hand: s.hand.iter().map(|c| JsCard { suit: c.suit, rank: c.rank }).collect(),
+                hand: s
+                    .hand
+                    .iter()
+                    .map(|c| JsCard {
+                        suit: c.suit,
+                        rank: c.rank,
+                    })
+                    .collect(),
                 allowed: s.allowed,
-                played: JsCard { suit: s.played.suit, rank: s.played.rank },
+                played: JsCard {
+                    suit: s.played.suit,
+                    rank: s.played.rank,
+                },
             })
             .collect();
         swb::to_value(&(res.map(|r| r as u8), js_steps)).unwrap()
@@ -130,9 +140,19 @@ impl WasmGame {
             .into_iter()
             .map(|s| JsRoundStep {
                 player: s.player,
-                hand: s.hand.iter().map(|c| JsCard { suit: c.suit, rank: c.rank }).collect(),
+                hand: s
+                    .hand
+                    .iter()
+                    .map(|c| JsCard {
+                        suit: c.suit,
+                        rank: c.rank,
+                    })
+                    .collect(),
                 allowed: s.allowed,
-                played: JsCard { suit: s.played.suit, rank: s.played.rank },
+                played: JsCard {
+                    suit: s.played.suit,
+                    rank: s.played.rank,
+                },
             })
             .collect();
         swb::to_value(&(res.map(|r| r as u8), js_steps)).unwrap()
