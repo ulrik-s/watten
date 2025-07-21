@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "scripts": {
+    "start": "npm --prefix frontend install && npm --prefix frontend run build:wasm && npm --prefix frontend exec vite"
+  }
+}

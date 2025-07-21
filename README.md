@@ -25,6 +25,18 @@ tool and a recent Node.js installation.
 
 ### Building and running
 
+You can build the WebAssembly package, install JavaScript dependencies and
+start the development server with a single command from the repository root.
+The command runs `wasm-pack build` under the hood to compile the Rust code:
+
+```bash
+npm start
+```
+
+Open `http://localhost:5173` in your browser.
+
+If you prefer to run the steps manually:
+
 1. Compile the Rust code to WebAssembly from the repository root:
 
    ```bash
@@ -40,8 +52,6 @@ tool and a recent Node.js installation.
    npm install
    npm start
    ```
-
-   Open `http://localhost:5173` in your browser.
 
 3. To create a production build run:
 
