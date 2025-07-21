@@ -17,3 +17,9 @@ crate-type = ["rlib", "cdylib"]
 
 [alias]
 full = "test -- --ignored"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false

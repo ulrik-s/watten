@@ -127,6 +127,12 @@ pub struct GameState {
     played: [Vec<usize>; 4],
     /// Optional subset of permutation indices for populating the database
     perm_range: Option<Vec<usize>>,
+    // interactive round state
+    playing_round: bool,
+    trick_lead: usize,
+    trick_pos: usize,
+    tricks_won: [usize; 2],
+    current_trick: Vec<(usize, Card)>,
 }
 
 impl GameState {
@@ -151,6 +157,11 @@ impl GameState {
             orig_hands: [[DUMMY_CARD; TRICKS_PER_ROUND]; 4],
             played: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             perm_range: None,
+            playing_round: false,
+            trick_lead: 0,
+            trick_pos: 0,
+            tricks_won: [0, 0],
+            current_trick: Vec::new(),
         }
     }
 
@@ -193,6 +204,15 @@ impl GameState {
         println!("Striker rank is {}", next_card.rank);
         println!("Rechte is {}", self.rechte.unwrap());
         self.populate_database();
+    }
+
+    pub fn start_round_interactive(&mut self) {
+        self.start_round();
+        self.playing_round = true;
+        self.trick_lead = (self.dealer + 1) % 4;
+        self.trick_pos = 0;
+        self.tricks_won = [0, 0];
+        self.current_trick.clear();
     }
 
     fn populate_database(&mut self) {
@@ -253,7 +273,7 @@ impl GameState {
         allowed
     }
 
-    fn best_card_index(&self, p_idx: usize, allowed: &[usize]) -> usize {
+    pub fn best_card_index(&self, p_idx: usize, allowed: &[usize]) -> usize {
         let player = &self.players[p_idx];
         let playable: Vec<usize> = allowed.to_vec();
 
@@ -523,6 +543,133 @@ impl GameState {
             _ => {}
         }
         (result, log)
+    }
+
+    fn current_player(&self) -> usize {
+        (self.trick_lead + self.trick_pos) % 4
+    }
+
+    fn current_allowed(&self) -> Vec<usize> {
+        let p = self.current_player();
+        if self.trick_pos == 0 {
+            (0..self.players[p].hand.len()).collect()
+        } else {
+            let lead_card = self.current_trick[0].1;
+            self.allowed_indices(p, lead_card)
+        }
+    }
+
+    fn play_internal(&mut self, p_idx: usize, idx: usize, record: &mut Vec<RoundStep>) {
+        let hand_before = self.players[p_idx].hand.clone();
+        let allowed = if self.trick_pos == 0 {
+            (0..hand_before.len()).collect()
+        } else {
+            let lead_card = self.current_trick[0].1;
+            self.allowed_indices(p_idx, lead_card)
+        };
+        let card = self.players[p_idx].hand.remove(idx);
+        let orig = self.find_orig_index(p_idx, card);
+        self.played[p_idx].push(orig);
+        record.push(RoundStep {
+            player: p_idx,
+            hand: hand_before,
+            allowed: allowed.clone(),
+            played: card,
+        });
+        self.current_trick.push((p_idx, card));
+        self.trick_pos += 1;
+        if self.trick_pos == 4 {
+            self.finish_trick(record);
+        }
+    }
+
+    fn finish_trick(&mut self, record: &mut Vec<RoundStep>) {
+        let rechte = self.rechte.unwrap();
+        let lead_suit = self.current_trick[0].1.suit;
+        let mut best = (self.current_trick[0].0, self.current_trick[0].1, 0usize);
+        let mut best_score = card_strength(&best.1, lead_suit, rechte, 0);
+        for (pos, &(idx, ref card)) in self.current_trick.iter().enumerate().skip(1) {
+            let val = card_strength(card, lead_suit, rechte, pos);
+            if val > best_score {
+                best = (idx, *card, pos);
+                best_score = val;
+            }
+        }
+        let winner_idx = best.0;
+        self.tricks_won[winner_idx % 2] += 1;
+        self.trick_lead = winner_idx;
+        self.trick_pos = 0;
+        self.current_trick.clear();
+        if self.tricks_won[0] + self.tricks_won[1] == TRICKS_PER_ROUND {
+            self.finish_round();
+        }
+    }
+
+    fn finish_round(&mut self) {
+        self.playing_round = false;
+        self.dealer = (self.dealer + 1) % 4;
+        let result = if self.tricks_won[0] > self.tricks_won[1] {
+            GameResult::Team1Win
+        } else {
+            GameResult::Team2Win
+        };
+        match result {
+            GameResult::Team1Win => self.scores[0] += self.round_points,
+            GameResult::Team2Win => self.scores[1] += self.round_points,
+            _ => {}
+        }
+    }
+
+    fn advance_bots_internal(&mut self, record: &mut Vec<RoundStep>) -> Option<GameResult> {
+        while self.playing_round {
+            let p = self.current_player();
+            if self.players[p].human {
+                return None;
+            }
+            let allowed = self.current_allowed();
+            let idx = self.best_card_index(p, &allowed);
+            self.play_internal(p, idx, record);
+            if !self.playing_round {
+                return Some(if self.tricks_won[0] > self.tricks_won[1] {
+                    GameResult::Team1Win
+                } else {
+                    GameResult::Team2Win
+                });
+            }
+        }
+        Some(if self.tricks_won[0] > self.tricks_won[1] {
+            GameResult::Team1Win
+        } else {
+            GameResult::Team2Win
+        })
+    }
+
+    pub fn advance_bots(&mut self) -> (Option<GameResult>, Vec<RoundStep>) {
+        let mut log = Vec::new();
+        let result = self.advance_bots_internal(&mut log);
+        (result, log)
+    }
+
+    pub fn human_allowed_indices(&self) -> Vec<usize> {
+        self.current_allowed()
+    }
+
+    pub fn human_play(&mut self, idx: usize) -> (Option<GameResult>, Vec<RoundStep>) {
+        let mut log = Vec::new();
+        let p = self.current_player();
+        self.play_internal(p, idx, &mut log);
+        if self.playing_round {
+            if let Some(res) = self.advance_bots_internal(&mut log) {
+                return (Some(res), log);
+            }
+        } else {
+            return (Some(if self.tricks_won[0] > self.tricks_won[1] {
+                GameResult::Team1Win
+            } else {
+                GameResult::Team2Win
+            }), log);
+        }
+        (None, log)
     }
 }
 
