@@ -159,7 +159,7 @@ impl GameState {
             orig_hands: [[DUMMY_CARD; TRICKS_PER_ROUND]; 4],
             played: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             perm_range: None,
-            workers: num_cpus::get(),
+            workers: num_cpus::get() * 2,
             progress_cb: None,
             playing_round: false,
             trick_lead: 0,
@@ -242,6 +242,12 @@ impl GameState {
 
         let workers = self.workers.max(1);
         let total = (indices.len() as u64).pow(4);
+        println!(
+            "Populating database with {} permutations using {} workers ({} total plays)",
+            indices.len(),
+            workers,
+            total
+        );
         let mut cb_opt = self.progress_cb.take();
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -251,6 +257,7 @@ impl GameState {
 
             let (tx, rx) = channel();
             for worker_id in 0..workers {
+                println!("Starting worker {}", worker_id);
                 let tx = tx.clone();
                 let indices = indices.clone();
                 let hands = self.orig_hands;
@@ -269,8 +276,7 @@ impl GameState {
                         let i2 = indices[i2_idx];
                         let i3 = indices[i3_idx];
                         let i4 = indices[i4_idx];
-                        let result =
-                            play_hand(&hands, [i1, i2, i3, i4], dealer, rechte, &perms);
+                        let result = play_hand(&hands, [i1, i2, i3, i4], dealer, rechte, &perms);
                         tx.send((i1, i2, i3, i4, result)).unwrap();
                     }
                 });
@@ -282,6 +288,9 @@ impl GameState {
                 done += 1;
                 if let Some(ref cb) = cb_opt {
                     cb(done);
+                }
+                if done % 1_000_000 == 0 || done == total {
+                    println!("Progress: {} / {}", done, total);
                 }
                 if done == total {
                     break;
@@ -307,6 +316,9 @@ impl GameState {
                             done += 1;
                             if let Some(ref cb) = cb_opt {
                                 cb(done);
+                            }
+                            if done % 1_000_000 == 0 || done == total {
+                                println!("Progress: {} / {}", done, total);
                             }
                         }
                     }

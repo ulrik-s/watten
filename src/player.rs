@@ -1,7 +1,6 @@
 use rand::seq::SliceRandom;
 use std::io::{self, Write};
 
-
 fn format_hand(hand: &[Card], allowed: &[usize], rates: Option<&[f64]>) -> String {
     let mut out = String::new();
     for (i, c) in hand.iter().enumerate() {
