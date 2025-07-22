@@ -202,6 +202,7 @@ impl GameState {
     }
 
     pub fn start_round(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
         let overall_start = std::time::Instant::now();
         self.round_points = ROUND_POINTS;
         self.last_raiser = None;
@@ -228,9 +229,12 @@ impl GameState {
         println!("Trump suit is {}", dealer_card.suit);
         println!("Striker rank is {}", next_card.rank);
         println!("Rechte is {}", self.rechte.unwrap());
+        #[cfg(not(target_arch = "wasm32"))]
         let db_start = std::time::Instant::now();
         self.populate_database();
+        #[cfg(not(target_arch = "wasm32"))]
         println!("populate_database() took {:?}", db_start.elapsed());
+        #[cfg(not(target_arch = "wasm32"))]
         println!("start_round() total time {:?}", overall_start.elapsed());
     }
 
@@ -244,6 +248,7 @@ impl GameState {
     }
 
     fn populate_database(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
         let start = std::time::Instant::now();
         self.db = Box::new(InMemoryGameDatabase::new());
         let perms = all_hand_orders();
@@ -341,6 +346,7 @@ impl GameState {
         }
 
         self.progress_cb = cb_opt;
+        #[cfg(not(target_arch = "wasm32"))]
         println!("populate_database finished in {:?}", start.elapsed());
     }
 
@@ -381,6 +387,7 @@ impl GameState {
     }
 
     pub fn best_card_index(&self, p_idx: usize, allowed: &[usize]) -> usize {
+        #[cfg(not(target_arch = "wasm32"))]
         let timer = std::time::Instant::now();
         let player = &self.players[p_idx];
         let playable: Vec<usize> = allowed.to_vec();
@@ -432,6 +439,7 @@ impl GameState {
                 best_idx = idx;
             }
         }
+        #[cfg(not(target_arch = "wasm32"))]
         println!(
             "best_card_index for player {} took {:?}",
             p_idx,
@@ -441,6 +449,7 @@ impl GameState {
     }
 
     fn card_win_rate(&self, p_idx: usize, hand_idx: usize) -> f64 {
+        #[cfg(not(target_arch = "wasm32"))]
         let timer = std::time::Instant::now();
         let player = &self.players[p_idx];
         let card = player.hand[hand_idx];
@@ -496,6 +505,7 @@ impl GameState {
             wins as f64 / total as f64
         };
         self.rate_cache.borrow_mut().insert(key, rate);
+        #[cfg(not(target_arch = "wasm32"))]
         println!(
             "card_win_rate for player {} hand {} took {:?}",
             p_idx,
