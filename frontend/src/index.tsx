@@ -17,6 +17,7 @@ interface JsRoundStep {
 }
 
 const App = () => {
+  const PROGRESS_TOTAL = 120 ** 4;
   const [game, setGame] = useState<WasmGame | null>(null);
   const [hand, setHand] = useState<JsCard[]>([]);
   const [allowed, setAllowed] = useState<number[]>([]);
@@ -25,10 +26,20 @@ const App = () => {
   const [scores, setScores] = useState<[number, number]>([0, 0]);
   const [trump, setTrump] = useState<string | null>(null);
   const [striker, setStriker] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     init().then(() => {
       const g = new WasmGame(1);
+      if ((g as any).set_workers) {
+        (g as any).set_workers(navigator.hardwareConcurrency || 4);
+      }
+      if ((g as any).set_progress_callback) {
+        (g as any).set_progress_callback((c: number) => {
+          setProgress(c);
+        });
+      }
       g.start_round_interactive();
       setGame(g);
       setTrump(g.trump_suit());
@@ -36,6 +47,7 @@ const App = () => {
       const [res, steps] = g.advance_bots() as [number | null, JsRoundStep[]];
       handleSteps(steps);
       updateHand(g);
+      setLoading(false);
     });
   }, []);
 
@@ -73,6 +85,16 @@ const App = () => {
         setLog((prev) => [...prev, 'Game Over']);
       }
     }
+  }
+
+  if (loading) {
+    return (
+      <div>
+        <h1>Watten</h1>
+        <p>Calculating...</p>
+        <progress value={progress} max={PROGRESS_TOTAL}></progress>
+      </div>
+    );
   }
 
   return (

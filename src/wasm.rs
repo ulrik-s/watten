@@ -54,6 +54,18 @@ impl WasmGame {
         self.inner.clear_perm_range();
     }
 
+    /// Set the number of worker threads used for database population.
+    pub fn set_workers(&mut self, workers: usize) {
+        self.inner.set_workers(workers);
+    }
+
+    /// Register a JavaScript callback for database population progress.
+    pub fn set_progress_callback(&mut self, cb: js_sys::Function) {
+        self.inner.set_progress_callback(Some(Box::new(move |v| {
+            let _ = cb.call1(&JsValue::NULL, &JsValue::from(v));
+        })));
+    }
+
     pub fn play_round(&mut self) -> u8 {
         self.inner.play_round() as u8
     }
