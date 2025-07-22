@@ -135,6 +135,8 @@ pub struct GameState {
     trick_pos: usize,
     tricks_won: [usize; 2],
     current_trick: Vec<(usize, Card)>,
+    /// Cache for card win rates to avoid repeated database lookups
+    rate_cache: std::cell::RefCell<std::collections::HashMap<u64, f64>>,
 }
 
 impl GameState {
@@ -166,6 +168,7 @@ impl GameState {
             trick_pos: 0,
             tricks_won: [0, 0],
             current_trick: Vec::new(),
+            rate_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
 
@@ -193,6 +196,7 @@ impl GameState {
     }
 
     pub fn start_round(&mut self) {
+        let overall_start = std::time::Instant::now();
         self.round_points = ROUND_POINTS;
         self.last_raiser = None;
         let mut cards = deck();
@@ -218,7 +222,10 @@ impl GameState {
         println!("Trump suit is {}", dealer_card.suit);
         println!("Striker rank is {}", next_card.rank);
         println!("Rechte is {}", self.rechte.unwrap());
+        let db_start = std::time::Instant::now();
         self.populate_database();
+        println!("populate_database() took {:?}", db_start.elapsed());
+        println!("start_round() total time {:?}", overall_start.elapsed());
     }
 
     pub fn start_round_interactive(&mut self) {
@@ -231,6 +238,7 @@ impl GameState {
     }
 
     fn populate_database(&mut self) {
+        let start = std::time::Instant::now();
         self.db = Box::new(InMemoryGameDatabase::new());
         let perms = all_hand_orders();
         let rechte = self.rechte.unwrap();
@@ -327,6 +335,7 @@ impl GameState {
         }
 
         self.progress_cb = cb_opt;
+        println!("populate_database finished in {:?}", start.elapsed());
     }
 
     fn find_orig_index(&self, p_idx: usize, card: Card) -> usize {
@@ -366,6 +375,7 @@ impl GameState {
     }
 
     pub fn best_card_index(&self, p_idx: usize, allowed: &[usize]) -> usize {
+        let timer = std::time::Instant::now();
         let player = &self.players[p_idx];
         let playable: Vec<usize> = allowed.to_vec();
 
@@ -416,13 +426,32 @@ impl GameState {
                 best_idx = idx;
             }
         }
+        println!(
+            "best_card_index for player {} took {:?}",
+            p_idx,
+            timer.elapsed()
+        );
         best_idx
     }
 
     fn card_win_rate(&self, p_idx: usize, hand_idx: usize) -> f64 {
+        let timer = std::time::Instant::now();
         let player = &self.players[p_idx];
         let card = player.hand[hand_idx];
         let orig = self.find_orig_index(p_idx, card);
+        // compute a hash key for caching
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        p_idx.hash(&mut hasher);
+        orig.hash(&mut hasher);
+        for p in &self.played {
+            p.hash(&mut hasher);
+        }
+        let key = hasher.finish();
+        if let Some(rate) = self.rate_cache.borrow().get(&key) {
+            return *rate;
+        }
+
         let mut lists: [Vec<usize>; 4] = std::array::from_fn(|_| Vec::new());
         for i in 0..4 {
             let mut prefix = self.played[i].clone();
@@ -455,11 +484,19 @@ impl GameState {
             GameResult::Team1Win as usize
         }];
         let total = wins + losses;
-        if total == 0 {
+        let rate = if total == 0 {
             0.0
         } else {
             wins as f64 / total as f64
-        }
+        };
+        self.rate_cache.borrow_mut().insert(key, rate);
+        println!(
+            "card_win_rate for player {} hand {} took {:?}",
+            p_idx,
+            hand_idx,
+            timer.elapsed()
+        );
+        rate
     }
 
     fn win_rates_for_player(&self, p_idx: usize) -> Vec<f64> {
@@ -1058,5 +1095,66 @@ mod tests {
         let rate = g.card_win_rate(0, 0);
         assert!(*counter.borrow() > 0);
         assert!((rate - 0.3333).abs() < 1e-4);
+    }
+
+    #[test]
+    fn cached_card_win_rate_is_faster() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        struct SlowDB {
+            calls: Rc<RefCell<u32>>,
+        }
+
+        impl GameDatabase for SlowDB {
+            fn set(&mut self, _p1: usize, _p2: usize, _p3: usize, _p4: usize, _r: GameResult) {}
+            fn get(&self, _p1: usize, _p2: usize, _p3: usize, _p4: usize) -> GameResult {
+                GameResult::NotPlayed
+            }
+            fn counts_in_ranges(
+                &self,
+                _p1: std::ops::Range<usize>,
+                _p2: std::ops::Range<usize>,
+                _p3: std::ops::Range<usize>,
+                _p4: std::ops::Range<usize>,
+            ) -> [u32; 4] {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                *self.calls.borrow_mut() += 1;
+                [0, 5, 10, 0]
+            }
+
+            fn counts_in_lists(
+                &self,
+                _p1: &[usize],
+                _p2: &[usize],
+                _p3: &[usize],
+                _p4: &[usize],
+            ) -> [u32; 4] {
+                self.counts_in_ranges(0..0, 0..0, 0..0, 0..0)
+            }
+        }
+
+        let counter = Rc::new(RefCell::new(0));
+        let mut g = GameState::new(0);
+        g.db = Box::new(SlowDB {
+            calls: counter.clone(),
+        });
+
+        g.players[0].hand = vec![Card::new(Suit::Hearts, Rank::Seven)];
+        g.orig_hands[0][0] = g.players[0].hand[0];
+
+        let start1 = std::time::Instant::now();
+        let _ = g.card_win_rate(0, 0);
+        let dur1 = start1.elapsed();
+        let calls_after_first = *counter.borrow();
+
+        let start2 = std::time::Instant::now();
+        let _ = g.card_win_rate(0, 0);
+        let dur2 = start2.elapsed();
+        let calls_after_second = *counter.borrow();
+
+        assert!(calls_after_first > 0);
+        assert_eq!(calls_after_first, calls_after_second);
+        assert!(dur2 < dur1);
     }
 }
