@@ -276,8 +276,7 @@ impl GameState {
                         let i2 = indices[i2_idx];
                         let i3 = indices[i3_idx];
                         let i4 = indices[i4_idx];
-                        let result =
-                            play_hand(&hands, [i1, i2, i3, i4], dealer, rechte, &perms);
+                        let result = play_hand(&hands, [i1, i2, i3, i4], dealer, rechte, &perms);
                         tx.send((i1, i2, i3, i4, result)).unwrap();
                     }
                 });
