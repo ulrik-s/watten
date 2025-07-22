@@ -1,9 +1,7 @@
 use crate::database::{GameDatabase, InMemoryGameDatabase};
 use crate::player::Player;
-use crate::{
-    all_hand_orders, deck, perm_prefix_range, shuffle, Card, GameResult, Rank, Suit,
-    HAND_PERMUTATIONS,
-};
+use crate::{all_hand_orders, deck, perm_prefix_range, shuffle, Card, GameResult, Rank, Suit};
+use num_cpus;
 use serde::Serialize;
 
 pub const WINNING_POINTS: usize = 13;
@@ -95,8 +93,8 @@ pub fn play_hand(
     hand_ids: [usize; 4],
     dealer: usize,
     rechte: Card,
+    perms: &[[usize; 5]],
 ) -> GameResult {
-    let perms = all_hand_orders();
     let orders = [
         perms[hand_ids[0]],
         perms[hand_ids[1]],
@@ -127,6 +125,10 @@ pub struct GameState {
     played: [Vec<usize>; 4],
     /// Optional subset of permutation indices for populating the database
     perm_range: Option<Vec<usize>>,
+    /// Number of worker threads used to populate the database
+    workers: usize,
+    /// Callback for progress updates during database population
+    progress_cb: Option<Box<dyn Fn(u64)>>,
     // interactive round state
     playing_round: bool,
     trick_lead: usize,
@@ -157,6 +159,8 @@ impl GameState {
             orig_hands: [[DUMMY_CARD; TRICKS_PER_ROUND]; 4],
             played: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             perm_range: None,
+            workers: num_cpus::get(),
+            progress_cb: None,
             playing_round: false,
             trick_lead: 0,
             trick_pos: 0,
@@ -175,6 +179,17 @@ impl GameState {
     /// again when populating the database.
     pub fn clear_perm_range(&mut self) {
         self.perm_range = None;
+    }
+
+    /// Set the number of worker threads used when populating the database.
+    pub fn set_workers(&mut self, workers: usize) {
+        self.workers = workers.max(1);
+    }
+
+    /// Provide a callback that receives progress updates while the database is
+    /// being populated.
+    pub fn set_progress_callback(&mut self, cb: Option<Box<dyn Fn(u64)>>) {
+        self.progress_cb = cb;
     }
 
     pub fn start_round(&mut self) {
@@ -224,17 +239,82 @@ impl GameState {
         } else {
             (0..perms.len()).collect()
         };
-        for &i1 in &indices {
-            for &i2 in &indices {
-                for &i3 in &indices {
-                    for &i4 in &indices {
+
+        let workers = self.workers.max(1);
+        let total = (indices.len() as u64).pow(4);
+        let mut cb_opt = self.progress_cb.take();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use std::sync::mpsc::channel;
+            use std::thread;
+
+            let (tx, rx) = channel();
+            for worker_id in 0..workers {
+                let tx = tx.clone();
+                let indices = indices.clone();
+                let hands = self.orig_hands;
+                let dealer = self.dealer;
+                let rechte = rechte;
+                let perms = perms.clone();
+                thread::spawn(move || {
+                    let len = indices.len();
+                    let total = len.pow(4);
+                    for n in (worker_id..total).step_by(workers) {
+                        let i1_idx = n / (len * len * len);
+                        let i2_idx = (n / (len * len)) % len;
+                        let i3_idx = (n / len) % len;
+                        let i4_idx = n % len;
+                        let i1 = indices[i1_idx];
+                        let i2 = indices[i2_idx];
+                        let i3 = indices[i3_idx];
+                        let i4 = indices[i4_idx];
                         let result =
-                            play_hand(&self.orig_hands, [i1, i2, i3, i4], self.dealer, rechte);
-                        self.db.set(i1, i2, i3, i4, result);
+                            play_hand(&hands, [i1, i2, i3, i4], dealer, rechte, &perms);
+                        tx.send((i1, i2, i3, i4, result)).unwrap();
+                    }
+                });
+            }
+            drop(tx);
+            let mut done = 0u64;
+            for (i1, i2, i3, i4, res) in rx {
+                self.db.set(i1, i2, i3, i4, res);
+                done += 1;
+                if let Some(ref cb) = cb_opt {
+                    cb(done);
+                }
+                if done == total {
+                    break;
+                }
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut done = 0u64;
+            for &i1 in &indices {
+                for &i2 in &indices {
+                    for &i3 in &indices {
+                        for &i4 in &indices {
+                            let result = play_hand(
+                                &self.orig_hands,
+                                [i1, i2, i3, i4],
+                                self.dealer,
+                                rechte,
+                                &perms,
+                            );
+                            self.db.set(i1, i2, i3, i4, result);
+                            done += 1;
+                            if let Some(ref cb) = cb_opt {
+                                cb(done);
+                            }
+                        }
                     }
                 }
             }
         }
+
+        self.progress_cb = cb_opt;
     }
 
     fn find_orig_index(&self, p_idx: usize, card: Card) -> usize {
@@ -824,7 +904,8 @@ mod tests {
         let rechte = Card::new(hands[0][0].suit, hands[1][0].rank);
         let ids = [0usize; 4];
         let expect = simulate_game(&hands, [[0, 1, 2, 3, 4]; 4], 0, rechte);
-        let result = play_hand(&hands, ids, 0, rechte);
+        let perms = all_hand_orders();
+        let result = play_hand(&hands, ids, 0, rechte, &perms);
         assert_eq!(expect, result);
     }
 
