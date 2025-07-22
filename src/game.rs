@@ -178,6 +178,12 @@ impl GameState {
         self.perm_range = Some(vec![idx]);
     }
 
+    /// Limit the permutation range used when populating the database to an
+    /// explicit list of permutation indices.
+    pub fn set_perm_range(&mut self, indices: Vec<usize>) {
+        self.perm_range = Some(indices);
+    }
+
     /// Clear any permutation restriction so that all permutations are used
     /// again when populating the database.
     pub fn clear_perm_range(&mut self) {
