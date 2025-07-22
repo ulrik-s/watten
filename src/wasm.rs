@@ -48,6 +48,18 @@ impl WasmGame {
         self.inner.set_perm_range_single(idx);
     }
 
+    /// Limit the permutation range used for database population to a custom
+    /// list of permutation indices.
+    pub fn set_perm_range(&mut self, indices: js_sys::Array) {
+        let mut vec = Vec::new();
+        for v in indices.iter() {
+            if let Some(n) = v.as_f64() {
+                vec.push(n as usize);
+            }
+        }
+        self.inner.set_perm_range(vec);
+    }
+
     /// Clear any permutation range so that all permutations are considered
     /// again.
     pub fn clear_perm_range(&mut self) {
