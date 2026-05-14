@@ -166,12 +166,19 @@ fn simulate_game(
     let mut pos = [0usize; 4];
     let mut lead = (dealer + 1) % 4;
     let mut tricks = [0usize; 2];
+    let dummy = Card {
+        suit: Suit::Hearts,
+        rank: Rank::Seven,
+    };
     let is_seeing = |p: usize| p == dealer || p == (dealer + 1) % 4;
     for _ in 0..TRICKS_PER_ROUND {
         let lead_card = hands[lead][perms[lead][pos[lead]]];
         pos[lead] += 1;
-        let mut played = vec![(lead, lead_card)];
-        for off in 1..4 {
+        // Stack-allocated trick buffers — avoids ~2 heap allocs per trick
+        // (~2 × 5 × 120^4 = ~2 billion allocations in a full populate).
+        let mut players: [usize; 4] = [lead, 0, 0, 0];
+        let mut trick_cards: [Card; 4] = [lead_card, dummy, dummy, dummy];
+        for off in 1..4usize {
             let idx = (lead + off) % 4;
             let card = hands[idx][perms[idx][pos[idx]]];
             // Must-follow check: if a trump is led and a seeing player
@@ -182,20 +189,23 @@ fn simulate_game(
                 && is_seeing(idx)
                 && card.suit != rechte.suit
             {
-                let has_trump_remaining =
-                    (pos[idx] + 1..TRICKS_PER_ROUND).any(|p| {
-                        hands[idx][perms[idx][p]].suit == rechte.suit
-                    });
+                let mut has_trump_remaining = false;
+                for p in pos[idx] + 1..TRICKS_PER_ROUND {
+                    if hands[idx][perms[idx][p]].suit == rechte.suit {
+                        has_trump_remaining = true;
+                        break;
+                    }
+                }
                 if has_trump_remaining {
                     return GameResult::RuleViolation;
                 }
             }
             pos[idx] += 1;
-            played.push((idx, card));
+            players[off] = idx;
+            trick_cards[off] = card;
         }
-        let trick_cards: Vec<Card> = played.iter().map(|(_, c)| *c).collect();
         let winner_pos = trick_winner_position(&trick_cards, rechte);
-        let winner_idx = played[winner_pos].0;
+        let winner_idx = players[winner_pos];
         tricks[winner_idx % 2] += 1;
         lead = winner_idx;
     }

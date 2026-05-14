@@ -18,7 +18,9 @@ js-sys = "0.3"
 crate-type = ["rlib", "cdylib"]
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = false
+# -O3 lets wasm-opt do aggressive optimisations. The 120^4 populate is
+# the hot path; enabling this typically gives a ~2-3x speed-up.
+wasm-opt = ['-O3', '--enable-bulk-memory']
 
 [package.metadata.wasm-pack.profile.dev]
 wasm-opt = false

@@ -14,7 +14,7 @@
 
 use std::cell::RefCell;
 
-use crate::database::{GameDatabase, InMemoryGameDatabase};
+use crate::database::{FlatGameDatabase, GameDatabase, InMemoryGameDatabase};
 use crate::game::{play_hand, MoveEvaluation, TRICKS_PER_ROUND};
 use crate::search::{
     evaluate_moves as search_evaluate_moves, SearchMemo, SearchPosition,
@@ -210,7 +210,7 @@ struct PopulateState {
 impl DatabaseEvaluator {
     pub fn new() -> Self {
         Self {
-            db: Box::new(InMemoryGameDatabase::new()),
+            db: Box::new(FlatGameDatabase::new()),
             perm_range: None,
             workers: num_cpus::get().max(1) * 2,
             populate: None,
@@ -241,7 +241,7 @@ impl MoveEvaluator for DatabaseEvaluator {
         dealer: usize,
         rechte: Card,
     ) {
-        self.db = Box::new(InMemoryGameDatabase::new());
+        self.db = Box::new(FlatGameDatabase::new());
         let perms = all_hand_orders();
         let indices: Vec<usize> = self
             .perm_range
@@ -373,7 +373,7 @@ impl MoveEvaluator for DatabaseEvaluator {
         dealer: usize,
         rechte: Card,
     ) -> usize {
-        self.db = Box::new(InMemoryGameDatabase::new());
+        self.db = Box::new(FlatGameDatabase::new());
         let perms = all_hand_orders();
         let indices: Vec<usize> = self
             .perm_range
