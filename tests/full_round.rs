@@ -1,4 +1,4 @@
-use watten::game::{card_strength, GameState};
+use watten::game::{trick_winner_position, GameState};
 use watten::{Card, Rank, Suit};
 
 #[test]
@@ -40,16 +40,9 @@ fn seeing_players_follow_trump_full_trick() {
     played.push((0usize, card0));
 
     let rechte = g.rechte.unwrap();
-    let mut best = (played[0].0, played[0].1, 0usize);
-    let mut best_score = card_strength(&best.1, lead_card.suit, rechte, 0);
-    for (pos, &(idx, ref card)) in played.iter().enumerate().skip(1) {
-        let val = card_strength(card, lead_card.suit, rechte, pos);
-        if val > best_score {
-            best = (idx, *card, pos);
-            best_score = val;
-        }
-    }
-    assert_eq!(best.0, 3); // striker should win
+    let trick_cards: Vec<Card> = played.iter().map(|(_, c)| *c).collect();
+    let winner_pos = trick_winner_position(&trick_cards, rechte);
+    assert_eq!(played[winner_pos].0, 3); // striker should win
 }
 
 fn manual_round(
@@ -62,23 +55,15 @@ fn manual_round(
     let mut tricks = [0usize; 2];
     for _ in 0..watten::game::TRICKS_PER_ROUND {
         let lead_card = hands[lead].remove(0);
-        let lead_suit = lead_card.suit;
         let mut played = vec![(lead, lead_card)];
         for off in 1..4 {
             let idx = (lead + off) % 4;
             let card = hands[idx].remove(0);
             played.push((idx, card));
         }
-        let mut best = (played[0].0, played[0].1, 0usize);
-        let mut best_score = card_strength(&best.1, lead_suit, rechte, 0);
-        for (pos, &(idx, ref card)) in played.iter().enumerate().skip(1) {
-            let val = card_strength(card, lead_suit, rechte, pos);
-            if val > best_score {
-                best = (idx, *card, pos);
-                best_score = val;
-            }
-        }
-        let (winner_idx, _, _) = best;
+        let trick_cards: Vec<Card> = played.iter().map(|(_, c)| *c).collect();
+        let winner_pos = trick_winner_position(&trick_cards, rechte);
+        let winner_idx = played[winner_pos].0;
         winners.push(winner_idx);
         tricks[winner_idx % 2] += 1;
         lead = winner_idx;
@@ -122,7 +107,12 @@ fn full_round_five_tricks_winners() {
         ],
     ];
     let (winners, _tricks) = manual_round(&mut hands, 0, rechte);
-    assert_eq!(winners, vec![0, 3, 1, 0, 2]);
+    // Under the round_score + trick_score model: in trick 4 the lead is
+    // Bells Seven (P1). P2 plays Hearts Nine (round 100, trick 0) and P0
+    // plays Hearts Ace (round 100, trick 0); they tie at 100 and the
+    // earlier play (P2, position 1) wins. The old test assumed trump
+    // rank broke the tie — under the user's new spec it does not.
+    assert_eq!(winners, vec![0, 3, 1, 2, 2]);
 }
 
 #[test]

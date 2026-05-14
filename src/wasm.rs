@@ -275,6 +275,12 @@ impl WasmGame {
         self.inner.scores.to_vec()
     }
 
+    /// Number of tricks each team has won SO FAR in the current round
+    /// (resets at start_round_interactive). `[team1, team2]`.
+    pub fn tricks_won(&self) -> Vec<usize> {
+        self.inner.tricks_won_for_round().to_vec()
+    }
+
     pub fn hand(&self, idx: usize) -> JsValue {
         let cards: Vec<JsCard> = self.inner.players[idx]
             .hand

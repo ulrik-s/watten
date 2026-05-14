@@ -32,6 +32,30 @@ h1 {
   animation: pop 0.3s ease-out;
 }
 
+.debug-toggle {
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 12px;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.85;
+}
+
+.card-debug {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: #ffe066;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin-top: 2px;
+  white-space: nowrap;
+  text-align: center;
+  min-height: 14px;
+}
+
 .round-decided {
   background: rgba(120, 200, 255, 0.18);
   border: 1px solid rgba(120, 200, 255, 0.5);

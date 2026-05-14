@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::game::{card_strength, TRICKS_PER_ROUND};
+use crate::game::{card_score, TRICKS_PER_ROUND};
 use crate::{Card, Rank};
 
 /// Per-round transposition table sharing memoization across moves.
@@ -45,10 +45,6 @@ fn is_seeing(player: u8, dealer: u8) -> bool {
     player == dealer || player == (dealer + 1) % 4
 }
 
-fn is_trump_like(c: &Card, rechte: Card) -> bool {
-    c.suit == rechte.suit || c.rank == Rank::Weli || c.rank == rechte.rank
-}
-
 fn legal_follow_mask(
     orig_hands: &[[Card; TRICKS_PER_ROUND]; 4],
     remaining_mask: u8,
@@ -57,14 +53,16 @@ fn legal_follow_mask(
     dealer: u8,
     rechte: Card,
 ) -> u8 {
-    if is_trump_like(&lead_card, rechte) && is_seeing(player, dealer) {
+    // Must-follow rule: if the lead card is in the trump suit, a seeing
+    // player must play a trump-suit card if they hold one.
+    if lead_card.suit == rechte.suit && is_seeing(player, dealer) {
         let mut subset = 0u8;
         for i in 0..TRICKS_PER_ROUND {
             if remaining_mask & (1 << i) == 0 {
                 continue;
             }
             let c = orig_hands[player as usize][i];
-            if is_trump_like(&c, rechte) {
+            if c.suit == rechte.suit {
                 subset |= 1 << i;
             }
         }
@@ -75,17 +73,18 @@ fn legal_follow_mask(
     remaining_mask
 }
 
-fn trick_winner(plays: &[(u8, Card); 4], lead_suit: crate::Suit, rechte: Card) -> u8 {
-    let mut best_idx = plays[0].0;
-    let mut best_score = card_strength(&plays[0].1, lead_suit, rechte, 0);
+fn trick_winner(plays: &[(u8, Card); 4], _lead_suit: crate::Suit, rechte: Card) -> u8 {
+    let trick_cards = [plays[0].1, plays[1].1, plays[2].1, plays[3].1];
+    let mut best_pos = 0usize;
+    let mut best_score = card_score(&trick_cards[0], 0, &trick_cards, rechte);
     for pos in 1..4 {
-        let val = card_strength(&plays[pos].1, lead_suit, rechte, pos);
-        if val > best_score {
-            best_score = val;
-            best_idx = plays[pos].0;
+        let s = card_score(&trick_cards[pos], pos, &trick_cards, rechte);
+        if s > best_score {
+            best_score = s;
+            best_pos = pos;
         }
     }
-    best_idx
+    plays[best_pos].0
 }
 
 /// Count, by future team-1 trick count, how many legal completions exist from

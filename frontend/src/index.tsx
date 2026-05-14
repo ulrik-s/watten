@@ -45,7 +45,6 @@ function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-// Mirrors the Rust card_strength logic so we can mark the trick winner.
 const RANK_VALUES: Record<string, number> = {
   Seven: 1,
   Eight: 2,
@@ -58,7 +57,6 @@ const RANK_VALUES: Record<string, number> = {
   Weli: 9,
 };
 
-// Friendly display string for a rank (matches the Rust Display impl).
 const RANK_DISPLAY: Record<string, string> = {
   Seven: '7',
   Eight: '8',
@@ -72,36 +70,51 @@ const RANK_DISPLAY: Record<string, string> = {
 };
 const displayRank = (r: string): string => RANK_DISPLAY[r] ?? r;
 
-function cardStrength(
+// Per the user's spec:
+//   round_score = (trump_suit ? 100 : 0) + (striker_rank ? 200 : 0)
+//   trick_score:
+//     - if card is striker rank AND an earlier striker was played → -400
+//     - else if card.suit === lead_suit                            → rank_value
+//     - else                                                       → 0
+//   total = round_score + trick_score  (compare with strict >, earlier wins ties)
+function roundScore(card: JsCard, rechte: JsCard): number {
+  let s = 0;
+  if (card.suit === rechte.suit) s += 100;
+  if (card.rank === rechte.rank) s += 200;
+  return s;
+}
+
+function trickScore(
   card: JsCard,
-  leadSuit: string,
-  rechte: JsCard,
-  position: number
+  position: number,
+  trick: TrickEntry[],
+  rechte: JsCard
 ): number {
-  let base: number;
-  if (card.suit === rechte.suit && card.rank === rechte.rank) {
-    base = 200;
-  } else if (card.rank === 'Weli') {
-    base = 180;
-  } else if (card.rank === rechte.rank) {
-    base = 190;
-  } else if (card.suit === rechte.suit) {
-    base = 100 + (RANK_VALUES[card.rank] ?? 0);
-  } else if (card.suit === leadSuit) {
-    base = 50 + (RANK_VALUES[card.rank] ?? 0);
-  } else {
-    base = RANK_VALUES[card.rank] ?? 0;
+  if (card.rank === rechte.rank) {
+    for (let earlier = 0; earlier < position; earlier++) {
+      if (trick[earlier].card.rank === rechte.rank) return -400;
+    }
   }
-  return base * 10 - position;
+  const leadSuit = trick[0].card.suit;
+  if (card.suit === leadSuit) return RANK_VALUES[card.rank] ?? 0;
+  return 0;
+}
+
+function cardTotalScore(
+  card: JsCard,
+  position: number,
+  trick: TrickEntry[],
+  rechte: JsCard
+): number {
+  return roundScore(card, rechte) + trickScore(card, position, trick, rechte);
 }
 
 function trickWinnerIndex(trick: TrickEntry[], rechte: JsCard | null): number {
   if (!rechte || trick.length === 0) return 0;
-  const leadSuit = trick[0].card.suit;
   let bestPos = 0;
-  let bestScore = cardStrength(trick[0].card, leadSuit, rechte, 0);
+  let bestScore = cardTotalScore(trick[0].card, 0, trick, rechte);
   for (let pos = 1; pos < trick.length; pos++) {
-    const s = cardStrength(trick[pos].card, leadSuit, rechte, pos);
+    const s = cardTotalScore(trick[pos].card, pos, trick, rechte);
     if (s > bestScore) {
       bestScore = s;
       bestPos = pos;
@@ -125,6 +138,8 @@ const App = () => {
   const [trick, setTrick] = useState<TrickEntry[]>([]);
   const [opponentHandSizes, setOpponentHandSizes] = useState<number[]>([5, 5, 5, 5]);
   const [scores, setScores] = useState<[number, number]>([0, 0]);
+  const [tricksThisRound, setTricksThisRound] = useState<[number, number]>([0, 0]);
+  const [showDebug, setShowDebug] = useState(false);
   const [trump, setTrump] = useState<string | null>(null);
   const [striker, setStriker] = useState<string | null>(null);
   const [roundPoints, setRoundPoints] = useState(2);
@@ -199,6 +214,13 @@ const App = () => {
     return n;
   }
 
+  function refreshTricksThisRound(g: WasmGame) {
+    const t = ((g as any).tricks_won?.() ?? null) as number[] | null;
+    if (t && t.length >= 2) {
+      setTricksThisRound([t[0], t[1]]);
+    }
+  }
+
   function refreshFromGame(g: WasmGame) {
     const currentHand = g.hand(0) as JsCard[];
     const currentAllowed = g.human_allowed_indices() as number[];
@@ -221,6 +243,7 @@ const App = () => {
     setEvalBySlot(evalMap);
     setScores(g.scores() as [number, number]);
     setRoundPoints((g as any).round_points?.() ?? 2);
+    refreshTricksThisRound(g);
   }
 
   async function processStepsAnimated(steps: JsRoundStep[]) {
@@ -263,13 +286,17 @@ const App = () => {
       }
 
       if (nextTrick.length === NUM_PLAYERS) {
-        // Trick completed: highlight the winner and announce it, then hold.
-        // Use the ref so this works on the very first round too (the state
-        // setRechte schedules wouldn't have committed yet otherwise).
         const winnerPos = trickWinnerIndex(nextTrick, rechteRef.current);
         const winnerPlayer = nextTrick[winnerPos].player;
         setTrickWinnerPos(winnerPos);
         setLog((prev) => [...prev, `Player ${winnerPlayer + 1} wins the trick`]);
+        // Update the team's trick-count for this round visibly the moment
+        // the trick completes.
+        setTricksThisRound((prev) => {
+          const next = [...prev] as [number, number];
+          next[winnerPlayer % 2] += 1;
+          return next;
+        });
         await sleep(TRICK_HOLD_MS);
       } else {
         await sleep(STEP_MS);
@@ -336,6 +363,7 @@ const App = () => {
     setTrickWinnerPos(null);
     setDecidedFor(null);
     setLastRaiseBy(null);
+    setTricksThisRound([0, 0]);
     g.start_round_interactive();
     setTrump(g.trump_suit());
     setStriker(g.striker_rank());
@@ -479,6 +507,19 @@ const App = () => {
         &nbsp;·&nbsp; Round worth: {roundPoints}
         {busy ? ' · thinking…' : ''}
       </p>
+      <p className="info" data-testid="tricks-this-round">
+        Tricks this round: Team 1 <strong>{tricksThisRound[0]}</strong>
+        &nbsp;·&nbsp; Team 2 <strong>{tricksThisRound[1]}</strong>
+      </p>
+      <label className="debug-toggle">
+        <input
+          type="checkbox"
+          checked={showDebug}
+          onChange={(e) => setShowDebug(e.target.checked)}
+          data-testid="show-debug"
+        />
+        Show scores
+      </label>
       {roundBanner && (
         <p className="round-banner" data-testid="round-banner">
           {roundBanner}
@@ -527,6 +568,9 @@ const App = () => {
           {Array.from({ length: NUM_PLAYERS }).map((_, i) => {
             const t = trick[i];
             const isWinner = trickWinnerPos === i;
+            const r = rechte;
+            const rs = t && r ? roundScore(t.card, r) : null;
+            const ts = t && r ? trickScore(t.card, i, trick, r) : null;
             return (
               <div
                 key={i}
@@ -539,6 +583,12 @@ const App = () => {
                       P{t.player + 1}
                       {isWinner ? ' ★' : ''}
                     </div>
+                    {showDebug && rs !== null && ts !== null && (
+                      <div className="card-debug" data-testid="trick-debug">
+                        R:{rs} T:{ts}
+                        <br />={rs + ts}
+                      </div>
+                    )}
                   </>
                 ) : null}
               </div>
@@ -572,6 +622,11 @@ const App = () => {
                 <div className="card-rate">
                   {rate !== null && allowedSlots.has(slotIdx) ? `${rate}%` : ''}
                 </div>
+                {showDebug && c && rechte && (
+                  <div className="card-debug" data-testid="hand-debug">
+                    R:{roundScore(c, rechte)}
+                  </div>
+                )}
               </div>
             );
           })}

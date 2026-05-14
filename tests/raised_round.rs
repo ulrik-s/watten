@@ -1,4 +1,4 @@
-use watten::game::{card_strength, GameState};
+use watten::game::{trick_winner_position, GameState};
 use watten::{Card, Rank, Suit};
 
 fn manual_round(
@@ -11,23 +11,15 @@ fn manual_round(
     let mut tricks = [0usize; 2];
     for _ in 0..watten::game::TRICKS_PER_ROUND {
         let lead_card = hands[lead].remove(0);
-        let lead_suit = lead_card.suit;
         let mut played = vec![(lead, lead_card)];
         for off in 1..4 {
             let idx = (lead + off) % 4;
             let card = hands[idx].remove(0);
             played.push((idx, card));
         }
-        let mut best = (played[0].0, played[0].1, 0usize);
-        let mut best_score = card_strength(&best.1, lead_suit, rechte, 0);
-        for (pos, &(idx, ref card)) in played.iter().enumerate().skip(1) {
-            let val = card_strength(card, lead_suit, rechte, pos);
-            if val > best_score {
-                best = (idx, *card, pos);
-                best_score = val;
-            }
-        }
-        let (winner_idx, _, _) = best;
+        let trick_cards: Vec<Card> = played.iter().map(|(_, c)| *c).collect();
+        let winner_pos = trick_winner_position(&trick_cards, rechte);
+        let winner_idx = played[winner_pos].0;
         winners.push(winner_idx);
         tricks[winner_idx % 2] += 1;
         lead = winner_idx;

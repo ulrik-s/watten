@@ -189,6 +189,43 @@ test.describe('widgets', () => {
     expect(anyPercent).toBe(true);
   });
 
+  test('Tricks-this-round counter increments when a trick completes', async ({ page }) => {
+    test.setTimeout(60000);
+    await waitForReady(page);
+    // Before any human play the bots have not completed a trick yet, so the
+    // counter must be 0–0.
+    const counter = page.getByTestId('tricks-this-round');
+    await expect(counter).toContainText('Team 1 0');
+    await expect(counter).toContainText('Team 2 0');
+    // Click a card → trick completes → exactly one team's count goes up.
+    await page.locator(SELECTABLE).first().click();
+    await expect
+      .poll(async () => {
+        const text = await counter.innerText();
+        const m = text.match(/Team\s*1\s*(\d+)\s*·\s*Team\s*2\s*(\d+)/);
+        return m ? parseInt(m[1], 10) + parseInt(m[2], 10) : 0;
+      }, { timeout: 10000 })
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  test('Show-scores debug toggle reveals round/trick scores per card', async ({ page }) => {
+    test.setTimeout(60000);
+    await waitForReady(page);
+    // Off by default — no debug badges.
+    await expect(page.getByTestId('hand-debug').first()).toHaveCount(0);
+    // Turn it on.
+    await page.getByTestId('show-debug').check();
+    // Hand cards now have an R:N badge.
+    const handDebug = page.getByTestId('hand-debug').first();
+    await expect(handDebug).toBeVisible();
+    await expect(handDebug).toContainText('R:');
+    // After playing a card, trick slots show R:/T: badges too.
+    await page.locator(SELECTABLE).first().click();
+    await expect(page.getByTestId('trick-debug').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId('trick-debug').first()).toContainText('R:');
+    await expect(page.getByTestId('trick-debug').first()).toContainText('T:');
+  });
+
   test('Trick winner banner matches the strongest card on the table', async ({ page }) => {
     test.setTimeout(60000);
     // Run this one at normal speed so the winner highlight is on screen long
