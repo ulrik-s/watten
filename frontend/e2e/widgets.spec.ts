@@ -65,11 +65,23 @@ test.describe('widgets', () => {
     if ((await page.locator('.log').getByText(/Team 2 accepts/).count()) > 0) {
       expect(await readRoundPoints(page)).toBe(beforePts + 1);
     } else {
-      // Folded: pre-raise points went to Team 1.
-      const afterText = await page.locator('p').filter({ hasText: /Team 1/ }).first().innerText();
-      const m = afterText.match(/Team\s*1\s*(\d+)/);
-      const team1 = parseInt(m![1], 10);
-      expect(team1).toBeGreaterThanOrEqual(beforeScores.team1 + beforePts);
+      // Folded: Team 1 is locked in for the pre-raise value, but the round
+      // is played to completion before the points actually land. Poll the
+      // score until it goes up.
+      await expect
+        .poll(
+          async () => {
+            const afterText = await page
+              .locator('p')
+              .filter({ hasText: /Team 1/ })
+              .first()
+              .innerText();
+            const m = afterText.match(/Team\s*1\s*(\d+)/);
+            return parseInt(m![1], 10);
+          },
+          { timeout: 30000 }
+        )
+        .toBeGreaterThanOrEqual(beforeScores.team1 + beforePts);
     }
   });
 

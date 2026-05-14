@@ -59,6 +59,39 @@ async function readRoundNumber(page: Page): Promise<number> {
   return parseInt(m[1], 10);
 }
 
+test('the human must play exactly 5 cards (5 clicks) to finish a round', async ({ page }) => {
+  test.setTimeout(120000);
+  await waitForReady(page);
+
+  const startRound = await readRoundNumber(page);
+  expect(startRound).toBe(1);
+
+  let clicks = 0;
+  for (let i = 0; i < 12; i++) {
+    // If the round has rolled over, stop counting.
+    if ((await readRoundNumber(page)) !== startRound) break;
+    if ((await page.locator('.game-over').count()) > 0) break;
+
+    const selectable = page.locator(SELECTABLE);
+    if ((await selectable.count()) === 0) {
+      // No card to click and the round hasn't rolled over — wait for the
+      // bots to give us a turn, then loop.
+      await page.waitForTimeout(150);
+      continue;
+    }
+    await selectable.first().click();
+    clicks += 1;
+    // Let the bots advance.
+    await page.waitForTimeout(200);
+  }
+
+  // Should be exactly 5: each round consists of 5 tricks, and the human
+  // plays one card per trick.
+  expect(clicks).toBe(5);
+  // And after those 5 clicks the round counter has moved on.
+  await expect.poll(() => readRoundNumber(page), { timeout: 30000 }).toBe(startRound + 1);
+});
+
 test('after a concede, every hand drains to zero before the next deal', async ({ page }) => {
   test.setTimeout(120000);
   await waitForReady(page);

@@ -265,13 +265,15 @@ const App = () => {
 
     // Drive the actual play through wasm, then animate every returned step
     // (human + bots) uniformly so the trick-winner highlight always fires.
+    // NOTE: serde-wasm-bindgen serializes Rust `None` as JS `undefined`, NOT
+    // `null`, so use `typeof === 'number'` to detect a real round-end result.
     const [res, steps] = game.human_play(currentIdx) as [
-      number | null,
+      number | undefined,
       JsRoundStep[]
     ];
     await processStepsAnimated(steps);
 
-    if (res !== null) {
+    if (typeof res === 'number') {
       await handleRoundEnded(game);
     } else {
       refreshFromGame(game);

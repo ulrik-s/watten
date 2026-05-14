@@ -102,6 +102,50 @@ fn raising_points_and_full_round() {
 }
 
 #[test]
+fn human_must_play_five_cards_to_finish_a_round() {
+    // Reproduces the user's report: after one human click, only the 5
+    // tricks should not auto-complete. The human must press five times.
+    let mut g = watten::game::GameState::new(1); // 1 human (player 0)
+    g.start_round_interactive();
+
+    // Bots advance up to the human's turn — the human's hand must remain at 5.
+    let (res, _) = g.advance_bots();
+    assert_eq!(res, None, "bots should pause at the human's turn");
+    assert_eq!(g.players[0].hand.len(), 5);
+
+    // Now simulate the human playing one card. The human plays current-hand
+    // index 0; after that, bots advance again. The round must not be over
+    // yet — only 1 trick has been completed.
+    let (res1, _) = g.human_play(0);
+    assert_eq!(
+        res1, None,
+        "round must not end after just one human play (got result)"
+    );
+    assert_eq!(
+        g.players[0].hand.len(),
+        4,
+        "human should now have 4 cards left"
+    );
+
+    // Repeat: play 4 more cards. The round should end on (or before) the
+    // 5th human play, never earlier.
+    for n in 0..4 {
+        let (res, _) = g.human_play(0);
+        if n < 3 {
+            assert_eq!(
+                res, None,
+                "round ended early after human's {}-th additional play",
+                n + 2
+            );
+        } else {
+            // Final play: the round must now have ended.
+            assert!(res.is_some(), "round should end on the 5th human play");
+        }
+    }
+    assert!(!g.playing_round);
+}
+
+#[test]
 fn concede_locks_in_winner_and_round_plays_to_completion() {
     // Drive a full interactive round: start, concede right away, then have
     // the engine auto-play every remaining card. Verify that no new deal
