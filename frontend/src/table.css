@@ -32,6 +32,19 @@ h1 {
   animation: pop 0.3s ease-out;
 }
 
+.round-banner {
+  background: rgba(255, 224, 102, 0.18);
+  border: 1px solid rgba(255, 224, 102, 0.55);
+  color: #ffe066;
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 700;
+  display: inline-block;
+  margin: 6px 0;
+  animation: pop 0.3s ease-out;
+}
+
 @keyframes pop {
   from { transform: scale(0.92); opacity: 0; }
   to   { transform: scale(1);    opacity: 1; }

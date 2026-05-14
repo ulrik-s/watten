@@ -32,6 +32,7 @@ const NUM_PLAYERS = 4;
 const CARDS_PER_HAND = 5;
 const STEP_MS = 320;            // delay between each animated card play
 const TRICK_HOLD_MS = 1900;     // how long a completed trick + winner lingers
+const ROUND_GAP_MS = 1800;      // extra pause before dealing a new round
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -109,6 +110,9 @@ const App = () => {
   const [winningPoints, setWinningPoints] = useState(15);
   const [gameOver, setGameOver] = useState<null | { winner: 1 | 2; final: [number, number] }>(null);
   const [busy, setBusy] = useState(false);
+  const [roundNumber, setRoundNumber] = useState(1);
+  // Brief "Round N is starting" announcement that fades away after the deal.
+  const [roundBanner, setRoundBanner] = useState<string | null>(null);
   // Position inside `trick` of the winning card, once a trick is full.
   // `null` while the trick is still being played out.
   const [trickWinnerPos, setTrickWinnerPos] = useState<number | null>(null);
@@ -257,6 +261,10 @@ const App = () => {
   async function handleRoundEnded(g: WasmGame) {
     const s = g.scores() as [number, number];
     setScores(s);
+    setLog((prev) => [
+      ...prev,
+      `Round ${roundNumber} ends. Score: Team 1 ${s[0]} — Team 2 ${s[1]}.`,
+    ]);
     if (s[0] >= winningPoints || s[1] >= winningPoints) {
       const winner = s[0] >= winningPoints ? 1 : 2;
       setGameOver({ winner, final: s });
@@ -264,11 +272,16 @@ const App = () => {
       setBusy(false);
       return;
     }
+    // Pause showing the trick winner / final state of the round, then
+    // announce the next round.
     await sleep(TRICK_HOLD_MS);
-    g.start_round_interactive();
+    const nextRound = roundNumber + 1;
+    setRoundBanner(`Round ${nextRound} — new deal`);
+    // Clear the table for the new deal.
     trickRef.current = [];
     setTrick([]);
     setTrickWinnerPos(null);
+    g.start_round_interactive();
     setTrump(g.trump_suit());
     setStriker(g.striker_rank());
     setRechte(((g as any).rechte?.() ?? null) as JsCard | null);
@@ -276,6 +289,11 @@ const App = () => {
     const orig = g.hand(0) as JsCard[];
     slotsRef.current = padSlots(orig);
     setSlots([...slotsRef.current]);
+    setRoundNumber(nextRound);
+    setLog((prev) => [...prev, `--- Round ${nextRound} deal ---`]);
+    // Give the user a beat to register the new deal before bots start.
+    await sleep(ROUND_GAP_MS);
+    setRoundBanner(null);
     const [, st] = g.advance_bots() as [number | null, JsRoundStep[]];
     await processStepsAnimated(st);
     refreshFromGame(g);
@@ -355,7 +373,8 @@ const App = () => {
     <div className="app">
       <h1>Watten</h1>
       <p className="info">
-        Trump: <strong>{trump ?? '-'}</strong>
+        Round <strong>{roundNumber}</strong>
+        &nbsp;·&nbsp; Trump: <strong>{trump ?? '-'}</strong>
         &nbsp;·&nbsp; Striker: <strong>{striker ?? '-'}</strong>
       </p>
       <p className="info">
@@ -363,6 +382,11 @@ const App = () => {
         &nbsp;·&nbsp; Round worth: {roundPoints}
         {busy ? ' · thinking…' : ''}
       </p>
+      {roundBanner && (
+        <p className="round-banner" data-testid="round-banner">
+          {roundBanner}
+        </p>
+      )}
       <div className="actions">
         <button onClick={onRaise} disabled={!game || busy || !!gameOver}>
           Raise (+1)
