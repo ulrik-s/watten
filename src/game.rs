@@ -1235,6 +1235,38 @@ mod tests {
     }
 
     #[test]
+    fn teammates_sit_opposite_so_seeing_players_split_across_teams() {
+        // P0 + P2 are one team (idx % 2 == 0), P1 + P3 are the other.
+        // Dealer rotates through 0..4; the forehand is always (dealer+1)%4.
+        // The two "seeing" players are dealer + forehand, so they must come
+        // from different teams — by construction, since modulo-2 of two
+        // consecutive integers always differs.
+        for dealer in 0..4 {
+            let forehand = (dealer + 1) % 4;
+            assert_ne!(
+                dealer % 2,
+                forehand % 2,
+                "dealer={} and forehand={} must be on different teams",
+                dealer,
+                forehand
+            );
+            // The dealer's *partner* (sitting opposite) is dealer + 2.
+            let partner = (dealer + 2) % 4;
+            assert_eq!(dealer % 2, partner % 2, "partner must be same team");
+            assert!(partner != dealer);
+        }
+        // And the seeing-player predicate matches this rule.
+        let mut g = GameState::new(0);
+        for dealer in 0..4 {
+            g.dealer = dealer;
+            assert!(g.is_seeing_player(dealer));
+            assert!(g.is_seeing_player((dealer + 1) % 4));
+            assert!(!g.is_seeing_player((dealer + 2) % 4));
+            assert!(!g.is_seeing_player((dealer + 3) % 4));
+        }
+    }
+
+    #[test]
     fn new_game_has_zero_scores() {
         let g = GameState::new(0);
         assert_eq!(g.scores, [0, 0]);

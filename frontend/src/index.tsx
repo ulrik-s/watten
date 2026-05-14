@@ -552,9 +552,14 @@ const App = () => {
   }
 
   function renderOpponent(playerIdx: number, size: number, gridArea: string) {
+    const team = playerIdx % 2; // 0 = Team 1 (P1+P3), 1 = Team 2 (P2+P4)
+    const relation = team === 0 ? 'teammate' : 'opponent';
     return (
-      <div className={`player ${gridArea}`}>
-        <div className="player-label">P{playerIdx + 1}</div>
+      <div className={`player ${gridArea} team-${team + 1} ${relation}`}>
+        <div className="player-label">
+          P{playerIdx + 1}
+          <span className="player-team-tag">{team === 0 ? 'T1' : 'T2'}</span>
+        </div>
         <div className="player-cards">
           {Array.from({ length: CARDS_PER_HAND }).map((_, i) => (
             <div key={i} className="opp-slot">
@@ -656,9 +661,20 @@ const App = () => {
           Game over. Team {gameOver.winner} wins {gameOver.final[0]}–{gameOver.final[1]}.
         </p>
       )}
+      <p className="info team-legend" data-testid="team-info">
+        <span className="team-1-chip">Team 1</span>: You (P1) &amp; P3 (across) &nbsp;·&nbsp;
+        <span className="team-2-chip">Team 2</span>: P2 &amp; P4 (opponents)
+      </p>
       <div className="table">
-        {renderOpponent(2, opponentHandSizes[2], 'p2')}
-        {renderOpponent(1, opponentHandSizes[1], 'p3')}
+        {/* Seating: teammates sit opposite each other.
+            Bottom: P1 (you, idx 0, Team 1).
+            Top:    P3 (idx 2, Team 1) — your teammate, directly across.
+            Left:   P2 (idx 1, Team 2) — opponent.
+            Right:  P4 (idx 3, Team 2) — opponent.
+            With this layout, the dealer & forehand (any two consecutive
+            players) are always one from each team. */}
+        {renderOpponent(1, opponentHandSizes[1], 'p2')}
+        {renderOpponent(2, opponentHandSizes[2], 'p3')}
         {renderOpponent(3, opponentHandSizes[3], 'p4')}
         <div className="center">
           {Array.from({ length: NUM_PLAYERS }).map((_, i) => {
@@ -675,8 +691,11 @@ const App = () => {
                 {t ? (
                   <>
                     <CardView suit={t.card.suit} rank={displayRank(t.card.rank)} />
-                    <div className="trick-label">
+                    <div className={`trick-label team-${(t.player % 2) + 1}`}>
                       P{t.player + 1}
+                      <span className="trick-team-tag">
+                        {t.player % 2 === 0 ? 'T1' : 'T2'}
+                      </span>
                       {isWinner ? ' ★' : ''}
                     </div>
                     {showDebug && rs !== null && ts !== null && (
@@ -698,7 +717,7 @@ const App = () => {
             </div>
           ) : null}
         </div>
-        <div className="player hand">
+        <div className="player hand team-1">
           {slots.map((c, slotIdx) => {
             const e = c ? evalBySlot.get(slotIdx) : undefined;
             const rate = e ? Math.round(e.rate * 100) : null;

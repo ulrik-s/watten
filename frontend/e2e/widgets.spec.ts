@@ -208,6 +208,26 @@ test.describe('widgets', () => {
       .toBeGreaterThanOrEqual(1);
   });
 
+  test('Teams P1+P3 vs P2+P4 are tagged in the UI; seeing players are split', async ({ page }) => {
+    test.setTimeout(20000);
+    await waitForReady(page);
+    // Legend with both chips visible.
+    const info = page.getByTestId('team-info');
+    await expect(info).toContainText('Team 1');
+    await expect(info).toContainText('Team 2');
+    await expect(info).toContainText('P3');
+    await expect(info).toContainText('P2');
+    await expect(info).toContainText('P4');
+    // Each opponent row carries a "T1" or "T2" tag in its player label.
+    // P2 (idx 1) → T2; P3 (idx 2) → T1; P4 (idx 3) → T2.
+    const p2 = page.locator('.player.p2 .player-label');
+    const p3 = page.locator('.player.p3 .player-label');
+    const p4 = page.locator('.player.p4 .player-label');
+    await expect(p2).toContainText('T2');
+    await expect(p3).toContainText('T1');
+    await expect(p4).toContainText('T2');
+  });
+
   test('120^4 database toggle is rendered and shows a progress bar when clicked', async ({ page }) => {
     test.setTimeout(60000);
     await waitForReady(page);

@@ -145,7 +145,46 @@ h1 {
 
 .player-label {
   font-size: 12px;
-  opacity: 0.75;
+  opacity: 0.85;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Team colours — P1+P3 (the human's team) are gold-ish; P2+P4 are blue-ish.
+   The same chips appear in the team legend above the table. */
+.team-1 .player-label,
+.team-1.trick-label,
+.team-1-chip {
+  color: #ffe066;
+}
+.team-2 .player-label,
+.team-2.trick-label,
+.team-2-chip {
+  color: #79d3ff;
+}
+
+.player-team-tag,
+.trick-team-tag {
+  font-size: 10px;
+  font-weight: bold;
+  opacity: 0.9;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 4px;
+  margin-left: 4px;
+}
+
+.team-legend {
+  font-size: 12px;
+  margin: 4px 0 8px;
+}
+.team-1-chip,
+.team-2-chip {
+  font-weight: bold;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
 }
 
 .player-cards {
