@@ -284,10 +284,47 @@ const App = () => {
 
   async function onRaise() {
     if (!game || busy || gameOver) return;
-    const ok = (game as any).raise_round?.(0);
-    if (!ok) return;
-    setRoundPoints((game as any).round_points?.() ?? roundPoints + 1);
-    setLog((prev) => [...prev, `Team 1 raises to ${(game as any).round_points()} points`]);
+    setBusy(true);
+    try {
+      const before = (game as any).round_points?.() ?? roundPoints;
+      const proposed = before + 1;
+      const ok = (game as any).propose_raise?.(0);
+      if (!ok) {
+        setBusy(false);
+        return;
+      }
+      setLog((prev) => [
+        ...prev,
+        `Team 1 proposes to raise the round to ${proposed} — Team 2 is thinking…`,
+      ]);
+      // Brief pause so the user reads the proposal before the bot answers.
+      await sleep(700);
+      const outcome = ((game as any).auto_respond_raise?.() ?? null) as
+        | null
+        | { accepted: true; new_value: number }
+        | { accepted: false; winning_team: number; points: number; ended: boolean };
+      if (!outcome) {
+        setBusy(false);
+        return;
+      }
+      if (outcome.accepted) {
+        setRoundPoints(outcome.new_value);
+        setLog((prev) => [
+          ...prev,
+          `Team 2 accepts. Round is now worth ${outcome.new_value}.`,
+        ]);
+        setBusy(false);
+      } else {
+        setLog((prev) => [
+          ...prev,
+          `Team 2 folds. Team ${outcome.winning_team + 1} takes ${outcome.points} points.`,
+        ]);
+        await handleRoundEnded(game);
+      }
+    } catch (err) {
+      setBusy(false);
+      throw err;
+    }
   }
 
   async function onConcede() {

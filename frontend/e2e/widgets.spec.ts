@@ -35,14 +35,43 @@ async function readScores(page: Page): Promise<{ team1: number; team2: number; t
 }
 
 test.describe('widgets', () => {
-  test('Raise button increments the round-worth display', async ({ page }) => {
+  test('Raise button proposes a raise that Team 2 either accepts or folds', async ({ page }) => {
     test.setTimeout(60000);
     await waitForReady(page);
-    const before = await readRoundPoints(page);
+    const beforePts = await readRoundPoints(page);
+    const beforeScores = await (async () => {
+      const text = await page.locator('p').filter({ hasText: /Team 1/ }).first().innerText();
+      const m = text.match(/Team\s*1\s*(\d+)\s*[—-]\s*Team\s*2\s*(\d+)/);
+      return { team1: parseInt(m![1], 10), team2: parseInt(m![2], 10) };
+    })();
     await page.getByRole('button', { name: /Raise/ }).click();
+    // Always log the proposal first.
+    await expect(page.locator('.log').getByText(/Team 1 proposes to raise/)).toBeVisible();
+    // Either accepted (round-worth bumps) or folded (game-over banner OR
+    // round resets to 2 and Team 1's score goes up by the pre-raise value).
     await expect
-      .poll(() => readRoundPoints(page), { timeout: 5000 })
-      .toBe(before + 1);
+      .poll(
+        async () => {
+          if ((await page.locator('.log').getByText(/Team 2 accepts/).count()) > 0) {
+            return 'accepted';
+          }
+          if ((await page.locator('.log').getByText(/Team 2 folds/).count()) > 0) {
+            return 'folded';
+          }
+          return null;
+        },
+        { timeout: 8000 }
+      )
+      .not.toBeNull();
+    if ((await page.locator('.log').getByText(/Team 2 accepts/).count()) > 0) {
+      expect(await readRoundPoints(page)).toBe(beforePts + 1);
+    } else {
+      // Folded: pre-raise points went to Team 1.
+      const afterText = await page.locator('p').filter({ hasText: /Team 1/ }).first().innerText();
+      const m = afterText.match(/Team\s*1\s*(\d+)/);
+      const team1 = parseInt(m![1], 10);
+      expect(team1).toBeGreaterThanOrEqual(beforeScores.team1 + beforePts);
+    }
   });
 
   test('Concede ends the round and credits the opponent', async ({ page }) => {

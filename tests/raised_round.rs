@@ -77,8 +77,11 @@ fn raising_points_and_full_round() {
         g.players[i].hand = original_hands[i].clone();
     }
     assert_eq!(g.round_points, watten::game::ROUND_POINTS);
-    assert!(g.raise_round(0).is_ok());
-    assert!(g.raise_round(1).is_ok());
+    g.playing_round = true; // synthetic setup; bypass start_round
+    assert!(g.propose_raise(0).is_ok());
+    assert!(g.respond_to_raise(1, true).is_ok());
+    assert!(g.propose_raise(1).is_ok());
+    assert!(g.respond_to_raise(0, true).is_ok());
     assert_eq!(g.round_points, watten::game::ROUND_POINTS + 2);
 
     let mut hands = original_hands.clone();

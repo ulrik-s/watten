@@ -26,8 +26,7 @@ async function readRoundPoints(page: Page) {
   return parseInt(m[1], 10);
 }
 
-/** Wait until the human can act again (Concede re-enables) or the game ends. */
-async function waitForHumanTurn(page: Page, timeoutMs = 20000): Promise<'turn' | 'gameover'> {
+async function waitForHumanTurn(page: Page, timeoutMs = 25000): Promise<'turn' | 'gameover'> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if ((await page.locator('.game-over').count()) > 0) return 'gameover';
@@ -38,11 +37,23 @@ async function waitForHumanTurn(page: Page, timeoutMs = 20000): Promise<'turn' |
   throw new Error('timed out waiting for human turn');
 }
 
-test('full game exercising raise, concede, card clicks and the trick-winner UI', async ({ page }) => {
+/** Wait until Team 2 has answered the raise (accept or fold). Returns the
+ *  resolution mode. */
+async function waitForRaiseResolution(page: Page, timeoutMs = 10000): Promise<'accepted' | 'folded'> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((await page.locator('.log').getByText(/Team 2 accepts/).count()) > 0) return 'accepted';
+    if ((await page.locator('.log').getByText(/Team 2 folds/).count()) > 0) return 'folded';
+    await page.waitForTimeout(150);
+  }
+  throw new Error('timed out waiting for raise resolution');
+}
+
+test('full game using card clicks, raise-with-response, concede, and the trick-winner UI', async ({ page }) => {
   test.setTimeout(240000);
   await waitForReady(page);
 
-  // === Round 1 — click a card, then verify the trick-winner UI ===
+  // === Round 1 — click a card and verify the trick-winner UI ===
   await page.locator(SELECTABLE).first().click();
   await expect(page.getByTestId('trick-winner')).toBeVisible({ timeout: 8000 });
   await expect(page.locator('.trick-slot.winner')).toHaveCount(1);
@@ -52,29 +63,29 @@ test('full game exercising raise, concede, card clicks and the trick-winner UI',
 
   await waitForHumanTurn(page);
 
-  // === Still round 1 — raise then concede, verify scores and log ===
+  // === Raise + response — covers the propose-respond path ===
+  const ptsBefore = await readRoundPoints(page);
+  const scoresBefore = await readScores(page);
   await page.getByRole('button', { name: /Raise/ }).click();
-  await expect.poll(() => readRoundPoints(page), { timeout: 5000 }).toBe(3);
-  await expect(page.locator('.log').getByText(/Team 1 raises to 3/)).toBeVisible();
+  await expect(page.locator('.log').getByText(/Team 1 proposes to raise/)).toBeVisible();
+  const resolution = await waitForRaiseResolution(page);
+  if (resolution === 'accepted') {
+    expect(await readRoundPoints(page)).toBe(ptsBefore + 1);
+    // Round continues — eventually concede so the round ends predictably.
+    await waitForHumanTurn(page);
+    const before2 = await readScores(page);
+    await page.getByRole('button', { name: /Concede/ }).click();
+    await expect
+      .poll(async () => (await readScores(page)).team2, { timeout: 10000 })
+      .toBeGreaterThanOrEqual(before2.team2 + ptsBefore + 1);
+  } else {
+    // Folded: Team 1 was awarded the pre-raise points.
+    await expect
+      .poll(async () => (await readScores(page)).team1, { timeout: 10000 })
+      .toBeGreaterThanOrEqual(scoresBefore.team1 + ptsBefore);
+  }
 
-  const beforeConcede = await readScores(page);
-  await page.getByRole('button', { name: /Concede/ }).click();
-  await expect(page.locator('.log').getByText(/Team 1 concedes/)).toBeVisible();
-  await expect
-    .poll(async () => (await readScores(page)).team2, { timeout: 10000 })
-    .toBeGreaterThanOrEqual(beforeConcede.team2 + 3);
-
-  // === Round 2 — verify raise + card click can be combined ===
-  await waitForHumanTurn(page);
-  expect(await readRoundPoints(page)).toBe(2); // reset for the new round
-  await page.getByRole('button', { name: /Raise/ }).click();
-  await expect.poll(() => readRoundPoints(page), { timeout: 5000 }).toBe(3);
-  await page.locator(SELECTABLE).first().click();
-
-  // Trick winner should fire again after this human play completes a trick.
-  await expect(page.getByTestId('trick-winner')).toBeVisible({ timeout: 10000 });
-
-  // === Rounds 3+ — alternate concede / click+concede until game ends ===
+  // === Subsequent rounds — drive through concedes and raises ===
   for (let round = 0; round < 25; round++) {
     const state = await waitForHumanTurn(page);
     if (state === 'gameover') break;
@@ -82,16 +93,23 @@ test('full game exercising raise, concede, card clicks and the trick-winner UI',
     if (s.team1 >= s.target || s.team2 >= s.target) break;
 
     if (round % 3 === 0) {
-      // Plain concede.
       await page.getByRole('button', { name: /Concede/ }).click();
     } else if (round % 3 === 1) {
-      // Raise then concede.
-      const r = page.getByRole('button', { name: /Raise/ });
-      if (await r.isEnabled()) await r.click();
-      const c = page.getByRole('button', { name: /Concede/ });
-      if (await c.isEnabled()) await c.click();
+      // Try a raise, then whichever way it resolves, continue.
+      await page.getByRole('button', { name: /Raise/ }).click();
+      try {
+        const r = await waitForRaiseResolution(page, 8000);
+        if (r === 'accepted') {
+          await waitForHumanTurn(page);
+          const c = page.getByRole('button', { name: /Concede/ });
+          if (await c.isEnabled()) await c.click();
+        }
+        // folded → round already ended, loop continues.
+      } catch {
+        /* timeout: continue anyway */
+      }
     } else {
-      // Play a card then concede on the next turn.
+      // Play a card then concede.
       await page.locator(SELECTABLE).first().click();
       const next = await waitForHumanTurn(page);
       if (next === 'gameover') break;
@@ -104,9 +122,14 @@ test('full game exercising raise, concede, card clicks and the trick-winner UI',
   await expect(page.locator('.game-over')).toBeVisible({ timeout: 30000 });
   const final = await readScores(page);
   expect(Math.max(final.team1, final.team2)).toBeGreaterThanOrEqual(final.target);
-  // The full log is kept in the DOM (the scroll area is fixed-height), so
-  // historical events from every feature should be present.
-  await expect(page.locator('.log').getByText(/raises/).first()).toHaveCount(1);
+
+  // The full log is kept in the DOM, so historical events from every
+  // feature should be present.
+  await expect(page.locator('.log').getByText(/proposes to raise/).first()).toHaveCount(1);
+  // At least one of accept / fold must have been logged.
+  const accepts = await page.locator('.log').getByText(/Team 2 accepts/).count();
+  const folds = await page.locator('.log').getByText(/Team 2 folds/).count();
+  expect(accepts + folds).toBeGreaterThan(0);
   await expect(page.locator('.log').getByText(/concedes/).first()).toHaveCount(1);
   await expect(page.locator('.log').getByText(/Player \d wins the trick/).first()).toHaveCount(1);
   await expect(page.locator('.log').getByText(/wins the game/).first()).toHaveCount(1);

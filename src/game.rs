@@ -41,6 +41,22 @@ impl MoveEvaluation {
     }
 }
 
+/// What happened when a pending raise was resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RaiseOutcome {
+    /// The responding team accepted; `round_points` is now `new_value`.
+    Accepted {
+        proposing_team: usize,
+        new_value: usize,
+    },
+    /// The responding team folded; the proposing team won the round at
+    /// `points` (the pre-raise round value). The round is over.
+    Folded {
+        winning_team: usize,
+        points: usize,
+    },
+}
+
 /// Default target score; standard Watten ranges 11..18 depending on variant.
 pub const WINNING_POINTS: usize = 15;
 pub const ROUND_POINTS: usize = 2;
@@ -156,8 +172,9 @@ pub struct GameState {
     pub rechte: Option<Card>,
     pub scores: [usize; 2],
     pub round_points: usize,
-    /// Which team last raised the round points.
-    last_raiser: Option<usize>,
+    /// Team that has an outstanding raise proposal awaiting the other team's
+    /// response, if any.
+    pending_raise: Option<usize>,
     orig_hands: [[Card; TRICKS_PER_ROUND]; 4],
     played: [Vec<usize>; 4],
     /// Optional subset of permutation indices, applied when in Database mode.
@@ -176,7 +193,7 @@ pub struct GameState {
     /// When true, print round/trick narration to stdout (used by the CLI).
     pub verbose: bool,
     // interactive round state
-    playing_round: bool,
+    pub playing_round: bool,
     trick_lead: usize,
     trick_pos: usize,
     tricks_won: [usize; 2],
@@ -200,7 +217,7 @@ impl GameState {
             rechte: None,
             scores: [0, 0],
             round_points: ROUND_POINTS,
-            last_raiser: None,
+            pending_raise: None,
             orig_hands: [[DUMMY_CARD; TRICKS_PER_ROUND]; 4],
             played: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             perm_range: None,
@@ -294,7 +311,7 @@ impl GameState {
 
     pub fn start_round(&mut self) {
         self.round_points = ROUND_POINTS;
-        self.last_raiser = None;
+        self.pending_raise = None;
         let mut cards = deck();
         shuffle(&mut cards);
         for p in self.players.iter_mut() {
@@ -451,19 +468,115 @@ impl GameState {
         self.rechte.map(|c| c.rank)
     }
 
-    /// Increase the value of the current round by one point on behalf of the
-    /// given team (`0` for team 1, `1` for team 2`). The same team may not
-    /// raise twice in a row. Returns `Ok(())` if the raise was accepted.
-    pub fn raise_round(&mut self, team: usize) -> Result<(), &'static str> {
+    /// Which team has an outstanding raise proposal awaiting the opposing
+    /// team's response.
+    pub fn pending_raise(&self) -> Option<usize> {
+        self.pending_raise
+    }
+
+    /// Propose a raise on behalf of `team`. The round value is *not* changed
+    /// yet — the opposing team must call [`Self::respond_to_raise`] to
+    /// either accept the raise (round value goes up by 1) or fold (which
+    /// awards the current `round_points` to the proposing team).
+    pub fn propose_raise(&mut self, team: usize) -> Result<(), &'static str> {
         if team > 1 {
             return Err("invalid team");
         }
-        if self.last_raiser == Some(team) {
-            return Err("team already raised");
+        if !self.playing_round {
+            return Err("round not in progress");
         }
-        self.round_points += 1;
-        self.last_raiser = Some(team);
-        Ok(())
+        match self.pending_raise {
+            None => {
+                self.pending_raise = Some(team);
+                Ok(())
+            }
+            Some(other) if other == team => Err("team already proposed a raise"),
+            Some(_) => Err("opposing team must respond to the pending raise first"),
+        }
+    }
+
+    /// Respond to a pending raise on behalf of `team`. `accept = true`
+    /// promotes the round value by one and clears the pending state.
+    /// `accept = false` folds: the proposing team is awarded the pre-raise
+    /// `round_points` and the round ends.
+    pub fn respond_to_raise(
+        &mut self,
+        team: usize,
+        accept: bool,
+    ) -> Result<RaiseOutcome, &'static str> {
+        if team > 1 {
+            return Err("invalid team");
+        }
+        let proposing = match self.pending_raise {
+            Some(t) => t,
+            None => return Err("no pending raise"),
+        };
+        if proposing == team {
+            return Err("the proposing team cannot respond to its own raise");
+        }
+        if accept {
+            self.round_points += 1;
+            self.pending_raise = None;
+            Ok(RaiseOutcome::Accepted {
+                proposing_team: proposing,
+                new_value: self.round_points,
+            })
+        } else {
+            let points = self.round_points;
+            self.pending_raise = None;
+            self.scores[proposing] += points;
+            self.playing_round = false;
+            self.dealer = (self.dealer + 1) % 4;
+            Ok(RaiseOutcome::Folded {
+                winning_team: proposing,
+                points,
+            })
+        }
+    }
+
+    /// Decide how the team that is *not* the proposer should respond to the
+    /// current pending raise, using the active move evaluator as a heuristic.
+    /// Returns the outcome of the response. Defaults to accept when the
+    /// estimate is unavailable.
+    ///
+    /// Accept threshold: 0.30 — if the responding team's estimated win
+    /// probability from the current position is below 30% they fold.
+    pub fn auto_respond_raise(&mut self) -> Result<RaiseOutcome, &'static str> {
+        let proposing = match self.pending_raise {
+            Some(t) => t,
+            None => return Err("no pending raise"),
+        };
+        let responding = 1 - proposing;
+        let rate = self.estimate_team_win_rate(responding).unwrap_or(0.5);
+        let accept = rate >= 0.30;
+        self.respond_to_raise(responding, accept)
+    }
+
+    /// Best-effort estimate of `team`'s probability of winning the round
+    /// from the current position. Uses the move evaluator: looks at the
+    /// next player to act and aggregates wins / total across all of their
+    /// legal moves, then flips the perspective if needed.
+    pub fn estimate_team_win_rate(&self, team: usize) -> Option<f64> {
+        if !self.playing_round {
+            return None;
+        }
+        let p = self.current_player();
+        let allowed = self.current_allowed();
+        if allowed.is_empty() {
+            return None;
+        }
+        let evals = self.evaluate_moves(p, &allowed, &self.current_trick, self.tricks_won);
+        let total: u32 = evals.iter().map(|e| e.total).sum();
+        if total == 0 {
+            return None;
+        }
+        let wins: u32 = evals.iter().map(|e| e.wins).sum();
+        let rate = wins as f64 / total as f64; // probability for `p`'s team
+        if team == p % 2 {
+            Some(rate)
+        } else {
+            Some(1.0 - rate)
+        }
     }
 
     /// Concede the current round on behalf of `team`: the opposing team
@@ -837,8 +950,17 @@ mod tests {
     #[test]
     fn concede_round_awards_round_points_to_other_team() {
         let mut g = GameState::new(0);
-        assert!(g.raise_round(0).is_ok());
-        assert!(g.raise_round(1).is_ok());
+        g.playing_round = true;
+        assert!(g.propose_raise(0).is_ok());
+        assert!(matches!(
+            g.respond_to_raise(1, true).unwrap(),
+            RaiseOutcome::Accepted { new_value, .. } if new_value == ROUND_POINTS + 1
+        ));
+        assert!(g.propose_raise(1).is_ok());
+        assert!(matches!(
+            g.respond_to_raise(0, true).unwrap(),
+            RaiseOutcome::Accepted { new_value, .. } if new_value == ROUND_POINTS + 2
+        ));
         assert_eq!(g.round_points, ROUND_POINTS + 2);
         let result = g.concede_round(0).unwrap();
         assert_eq!(result, GameResult::Team2Win);
@@ -847,17 +969,67 @@ mod tests {
     }
 
     #[test]
+    fn propose_then_accept_raises_round_points() {
+        let mut g = GameState::new(0);
+        g.playing_round = true;
+        assert_eq!(g.round_points, ROUND_POINTS);
+        assert!(g.propose_raise(0).is_ok());
+        assert_eq!(g.pending_raise(), Some(0));
+        // Same team can't propose again, and the proposing team can't respond.
+        assert!(g.propose_raise(0).is_err());
+        assert!(g.respond_to_raise(0, true).is_err());
+        let outcome = g.respond_to_raise(1, true).unwrap();
+        assert!(matches!(
+            outcome,
+            RaiseOutcome::Accepted {
+                proposing_team: 0,
+                new_value
+            } if new_value == ROUND_POINTS + 1
+        ));
+        assert_eq!(g.round_points, ROUND_POINTS + 1);
+        assert_eq!(g.pending_raise(), None);
+    }
+
+    #[test]
+    fn propose_then_fold_ends_round_at_pre_raise_value() {
+        let mut g = GameState::new(0);
+        g.playing_round = true;
+        assert!(g.propose_raise(0).is_ok());
+        let outcome = g.respond_to_raise(1, false).unwrap();
+        assert!(matches!(
+            outcome,
+            RaiseOutcome::Folded {
+                winning_team: 0,
+                points
+            } if points == ROUND_POINTS
+        ));
+        // Pre-raise value awarded; round_points itself did NOT go up.
+        assert_eq!(g.scores, [ROUND_POINTS, 0]);
+        assert_eq!(g.round_points, ROUND_POINTS);
+        assert!(!g.playing_round);
+        assert_eq!(g.pending_raise(), None);
+    }
+
+    #[test]
     fn teams_can_raise_alternating() {
         let mut g = GameState::new(0);
+        g.playing_round = true;
         assert_eq!(g.round_points, ROUND_POINTS);
-        assert!(g.raise_round(0).is_ok());
+        // Team 1 proposes, Team 2 accepts.
+        assert!(g.propose_raise(0).is_ok());
+        assert!(g.respond_to_raise(1, true).is_ok());
         assert_eq!(g.round_points, ROUND_POINTS + 1);
-        assert!(g.raise_round(0).is_err());
-        assert!(g.raise_round(1).is_ok());
+        // Team 1 can't propose again immediately — they were the last to raise.
+        // (But our state machine allows propose_raise after accept; the
+        // alternation comes from the other team being the only valid responder
+        // to a fresh proposal.)
+        assert!(g.propose_raise(1).is_ok());
+        assert!(g.respond_to_raise(0, true).is_ok());
         assert_eq!(g.round_points, ROUND_POINTS + 2);
-        assert!(g.raise_round(1).is_err());
-        assert!(g.raise_round(0).is_ok());
-        assert_eq!(g.round_points, ROUND_POINTS + 3);
+        // Can't propose while another is pending.
+        assert!(g.propose_raise(0).is_ok());
+        assert!(g.propose_raise(0).is_err()); // already pending
+        assert!(g.propose_raise(1).is_err()); // other team can't override
     }
 
     #[test]

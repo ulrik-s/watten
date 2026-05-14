@@ -82,10 +82,109 @@ impl WasmGame {
         self.inner.play_round() as u8
     }
 
-    /// Raise the current round's value by one point. team = 0 (Team 1) or
-    /// 1 (Team 2). Returns true on success, false if the raise is illegal.
-    pub fn raise_round(&mut self, team: usize) -> bool {
-        self.inner.raise_round(team).is_ok()
+    /// Propose a raise on behalf of `team` (0 or 1). The round value does
+    /// NOT change yet — the opposing team must respond. Returns true if
+    /// the proposal was recorded.
+    pub fn propose_raise(&mut self, team: usize) -> bool {
+        self.inner.propose_raise(team).is_ok()
+    }
+
+    /// Which team has an outstanding raise proposal, if any.
+    pub fn pending_raise(&self) -> Option<usize> {
+        self.inner.pending_raise()
+    }
+
+    /// Respond to the pending raise on behalf of `team` (the team that
+    /// did *not* propose). Returns a JSON-shaped object describing the
+    /// outcome:
+    ///   `{ accepted: true, new_value: N }`            on accept
+    ///   `{ accepted: false, winning_team: T, points: N, ended: true }` on fold
+    /// Returns `null` if there's no pending raise or the call is invalid.
+    pub fn respond_to_raise(&mut self, team: usize, accept: bool) -> JsValue {
+        match self.inner.respond_to_raise(team, accept) {
+            Ok(crate::game::RaiseOutcome::Accepted {
+                proposing_team,
+                new_value,
+            }) => {
+                #[derive(Serialize)]
+                struct Out {
+                    accepted: bool,
+                    proposing_team: usize,
+                    new_value: usize,
+                }
+                swb::to_value(&Out {
+                    accepted: true,
+                    proposing_team,
+                    new_value,
+                })
+                .unwrap_or(JsValue::NULL)
+            }
+            Ok(crate::game::RaiseOutcome::Folded {
+                winning_team,
+                points,
+            }) => {
+                #[derive(Serialize)]
+                struct Out {
+                    accepted: bool,
+                    winning_team: usize,
+                    points: usize,
+                    ended: bool,
+                }
+                swb::to_value(&Out {
+                    accepted: false,
+                    winning_team,
+                    points,
+                    ended: true,
+                })
+                .unwrap_or(JsValue::NULL)
+            }
+            Err(_) => JsValue::NULL,
+        }
+    }
+
+    /// Decide the response to a pending raise on behalf of the *opposing*
+    /// team using the move evaluator as a heuristic. Returns the same
+    /// shape as `respond_to_raise`.
+    pub fn auto_respond_raise(&mut self) -> JsValue {
+        match self.inner.auto_respond_raise() {
+            Ok(crate::game::RaiseOutcome::Accepted {
+                proposing_team,
+                new_value,
+            }) => {
+                #[derive(Serialize)]
+                struct Out {
+                    accepted: bool,
+                    proposing_team: usize,
+                    new_value: usize,
+                }
+                swb::to_value(&Out {
+                    accepted: true,
+                    proposing_team,
+                    new_value,
+                })
+                .unwrap_or(JsValue::NULL)
+            }
+            Ok(crate::game::RaiseOutcome::Folded {
+                winning_team,
+                points,
+            }) => {
+                #[derive(Serialize)]
+                struct Out {
+                    accepted: bool,
+                    winning_team: usize,
+                    points: usize,
+                    ended: bool,
+                }
+                swb::to_value(&Out {
+                    accepted: false,
+                    winning_team,
+                    points,
+                    ended: true,
+                })
+                .unwrap_or(JsValue::NULL)
+            }
+            Err(_) => JsValue::NULL,
+        }
     }
 
     /// Concede the current round on behalf of `team`. Returns true on success.
