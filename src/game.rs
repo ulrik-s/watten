@@ -353,6 +353,35 @@ impl GameState {
         self.tricks_won
     }
 
+    /// Switch to the Database evaluator and *begin* a chunked populate
+    /// using the current round's deal. Returns the total number of
+    /// games that will be populated; the caller must drive the populate
+    /// to completion via [`Self::step_database_populate`]. Useful from
+    /// the wasm UI where blocking the JS thread on a multi-minute
+    /// populate is undesirable.
+    pub fn begin_database_populate(&mut self) -> usize {
+        let rechte = match self.rechte {
+            Some(r) => r,
+            None => return 0,
+        };
+        self.evaluator_kind = Evaluator::Database;
+        let mut db = DatabaseEvaluator::new();
+        if let Some(ref r) = self.perm_range {
+            db.perm_range = Some(r.clone());
+        }
+        db.workers = self.workers;
+        let total = db.begin_chunked_populate(&self.orig_hands, self.dealer, rechte);
+        self.evaluator = Box::new(db);
+        total
+    }
+
+    /// Process up to `batch` games from the in-progress chunked populate.
+    /// Returns `(done_so_far, total)`. Once `done_so_far == total` the
+    /// database is ready and the evaluator can answer queries.
+    pub fn step_database_populate(&mut self, batch: usize) -> (usize, usize) {
+        self.evaluator.step_chunked_populate(batch)
+    }
+
     pub fn evaluator_name(&self) -> &'static str {
         self.evaluator.name()
     }

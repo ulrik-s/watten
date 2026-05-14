@@ -381,6 +381,32 @@ impl WasmGame {
         self.inner.set_evaluator(kind);
     }
 
+    /// Begin a chunked populate of the Database evaluator using the current
+    /// round. Returns the total number of games that will be populated.
+    /// Drive to completion with repeated calls to
+    /// [`Self::database_populate_step`] interleaved with `setTimeout(0)`
+    /// from JS so the UI can re-render in between batches.
+    pub fn database_populate_begin(&mut self) -> usize {
+        self.inner.begin_database_populate()
+    }
+
+    /// Process up to `batch` games. Returns `{ done, total, complete }`.
+    pub fn database_populate_step(&mut self, batch: usize) -> JsValue {
+        let (done, total) = self.inner.step_database_populate(batch);
+        #[derive(Serialize)]
+        struct Out {
+            done: usize,
+            total: usize,
+            complete: bool,
+        }
+        swb::to_value(&Out {
+            done,
+            total,
+            complete: done >= total && total > 0,
+        })
+        .unwrap_or(JsValue::NULL)
+    }
+
     pub fn evaluator(&self) -> String {
         match self.inner.evaluator() {
             Evaluator::Search => "search".into(),

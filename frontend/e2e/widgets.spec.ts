@@ -208,26 +208,32 @@ test.describe('widgets', () => {
       .toBeGreaterThanOrEqual(1);
   });
 
-  test('120^4 database toggle is rendered and unchecked by default', async ({ page }) => {
-    test.setTimeout(20000);
+  test('120^4 database toggle is rendered and shows a progress bar when clicked', async ({ page }) => {
+    test.setTimeout(60000);
     await waitForReady(page);
     const dbToggle = page.getByTestId('toggle-db-evaluator');
     await expect(dbToggle).toBeVisible();
     await expect(dbToggle).not.toBeChecked();
     await expect(dbToggle).toBeEnabled();
-    // The label text is informative — proves the right toggle is in place.
     const label = page.locator('label', { has: dbToggle });
     await expect(label).toContainText(/database/i);
-    // Clicking the toggle kicks off the full 120^4 populate which can take
-    // anywhere from seconds (release wasm) to minutes (debug wasm). We do
-    // NOT wait for it to complete here — that's a manual-verify thing on
-    // the live site. We *do* verify that the click registers (the loading
-    // indicator becomes visible briefly).
+    // Kick off the populate. We don't wait for it to complete — the goal
+    // is to verify the progress bar appears and the % advances.
     void dbToggle.click({ force: true });
-    await expect(page.getByText('loading…')).toBeVisible({ timeout: 5000 }).catch(() => {
-      // If the populate completes faster than the timeout (release wasm on
-      // a fast box), the indicator may already be gone — that's fine.
-    });
+    const bar = page.getByTestId('db-progress');
+    await expect(bar).toBeVisible({ timeout: 10000 });
+    // Read the percentage twice and assert it moved forward.
+    const readPercent = async () => {
+      const txt = await bar.innerText();
+      const m = txt.match(/(\d+)%/);
+      return m ? parseInt(m[1], 10) : 0;
+    };
+    const first = await readPercent();
+    await page.waitForTimeout(800);
+    const second = await readPercent();
+    expect(second).toBeGreaterThanOrEqual(first);
+    // At least *some* progress should have been made.
+    expect(Math.max(first, second)).toBeGreaterThan(0);
   });
 
   test('Show-scores debug toggle reveals round/trick scores per card', async ({ page }) => {

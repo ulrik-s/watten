@@ -53,6 +53,27 @@ pub trait MoveEvaluator {
 
     /// String tag for diagnostics / wasm.
     fn name(&self) -> &'static str;
+
+    /// Begin a chunked preparation pass for evaluators with expensive
+    /// per-round work (today: the 120^4 database). Returns the total number
+    /// of "units" the caller will need to step through via
+    /// [`Self::step_chunked_populate`]. Evaluators with cheap prep return
+    /// 0 — the caller is then free to skip the chunked loop.
+    fn begin_chunked_populate(
+        &mut self,
+        _orig_hands: &[[Card; TRICKS_PER_ROUND]; 4],
+        _dealer: usize,
+        _rechte: Card,
+    ) -> usize {
+        0
+    }
+
+    /// Process up to `batch` units of the chunked populate. Returns
+    /// `(done_so_far, total)`. When `done_so_far >= total` the populate
+    /// is finished and the evaluator is ready to answer queries.
+    fn step_chunked_populate(&mut self, _batch: usize) -> (usize, usize) {
+        (0, 0)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +191,20 @@ pub struct DatabaseEvaluator {
     pub db: Box<dyn GameDatabase>,
     pub perm_range: Option<Vec<usize>>,
     pub workers: usize,
+    /// In-progress chunked populate state. `Some` while
+    /// `begin_chunked_populate` has been called and not yet driven to
+    /// completion.
+    populate: Option<PopulateState>,
+}
+
+struct PopulateState {
+    orig_hands: [[Card; TRICKS_PER_ROUND]; 4],
+    dealer: usize,
+    rechte: Card,
+    perms: Vec<[usize; TRICKS_PER_ROUND]>,
+    indices: Vec<usize>,
+    progress: usize,
+    total: usize,
 }
 
 impl DatabaseEvaluator {
@@ -178,6 +213,7 @@ impl DatabaseEvaluator {
             db: Box::new(InMemoryGameDatabase::new()),
             perm_range: None,
             workers: num_cpus::get().max(1) * 2,
+            populate: None,
         }
     }
 
@@ -329,6 +365,68 @@ impl MoveEvaluator for DatabaseEvaluator {
 
     fn name(&self) -> &'static str {
         "database"
+    }
+
+    fn begin_chunked_populate(
+        &mut self,
+        orig_hands: &[[Card; TRICKS_PER_ROUND]; 4],
+        dealer: usize,
+        rechte: Card,
+    ) -> usize {
+        self.db = Box::new(InMemoryGameDatabase::new());
+        let perms = all_hand_orders();
+        let indices: Vec<usize> = self
+            .perm_range
+            .clone()
+            .unwrap_or_else(|| (0..perms.len()).collect());
+        let len = indices.len();
+        let total = len * len * len * len;
+        self.populate = Some(PopulateState {
+            orig_hands: *orig_hands,
+            dealer,
+            rechte,
+            perms,
+            indices,
+            progress: 0,
+            total,
+        });
+        total
+    }
+
+    fn step_chunked_populate(&mut self, batch: usize) -> (usize, usize) {
+        // Pull the state out so we can mutate `self.db` alongside it.
+        let mut state = match self.populate.take() {
+            Some(s) => s,
+            None => return (0, 0),
+        };
+        let end = state.total.min(state.progress.saturating_add(batch));
+        let len = state.indices.len();
+        for n in state.progress..end {
+            // n = ((i1 * len + i2) * len + i3) * len + i4   (base-len digits)
+            let i1_idx = n / (len * len * len);
+            let i2_idx = (n / (len * len)) % len;
+            let i3_idx = (n / len) % len;
+            let i4_idx = n % len;
+            let i1 = state.indices[i1_idx];
+            let i2 = state.indices[i2_idx];
+            let i3 = state.indices[i3_idx];
+            let i4 = state.indices[i4_idx];
+            let result = play_hand(
+                &state.orig_hands,
+                [i1, i2, i3, i4],
+                state.dealer,
+                state.rechte,
+                &state.perms,
+            );
+            self.db.set(i1, i2, i3, i4, result);
+        }
+        state.progress = end;
+        let progress = state.progress;
+        let total = state.total;
+        if progress < total {
+            self.populate = Some(state);
+        }
+        (progress, total)
     }
 }
 

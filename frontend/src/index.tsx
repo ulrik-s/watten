@@ -143,6 +143,9 @@ const App = () => {
   const [showDebug, setShowDebug] = useState(false);
   const [useDatabaseEvaluator, setUseDatabaseEvaluator] = useState(false);
   const [evaluatorBusy, setEvaluatorBusy] = useState(false);
+  // 0..1 progress for the database populate, or null when idle.
+  const [dbProgress, setDbProgress] = useState<number | null>(null);
+  const cancelDbPopulate = useRef(false);
   const [trump, setTrump] = useState<string | null>(null);
   const [striker, setStriker] = useState<string | null>(null);
   const [roundPoints, setRoundPoints] = useState(2);
@@ -406,28 +409,70 @@ const App = () => {
     }
   }
 
-  function onToggleEvaluator(useDb: boolean) {
+  async function onToggleEvaluator(useDb: boolean) {
     if (!game || evaluatorBusy) return;
+    if (!useDb) {
+      // Switching back to search is instant.
+      (game as any).set_evaluator?.('search');
+      setUseDatabaseEvaluator(false);
+      setDbProgress(null);
+      setLog((prev) => [...prev, 'Switched to fast search evaluator.']);
+      refreshFromGame(game);
+      return;
+    }
+    // Switching ON: chunked populate with a progress bar. We pump batches
+    // of plays inside wasm and yield to the JS event loop between them so
+    // the percentage updates and the page stays responsive.
+    cancelDbPopulate.current = false;
     setEvaluatorBusy(true);
-    // Defer the actual switch one tick so the "loading…" indicator renders
-    // before wasm starts the (potentially long) DB populate.
-    setTimeout(() => {
-      try {
-        (game as any).set_evaluator?.(useDb ? 'database' : 'search');
-        setUseDatabaseEvaluator(useDb);
-        setLog((prev) => [
-          ...prev,
-          useDb
-            ? 'Switched to 120⁴ database evaluator (illegal plays counted).'
-            : 'Switched to fast search evaluator.',
-        ]);
-        // Re-pull the move evaluations so debug numbers reflect the new
-        // evaluator immediately.
-        refreshFromGame(game);
-      } finally {
+    setDbProgress(0);
+    setLog((prev) => [
+      ...prev,
+      'Starting 120⁴ database populate…',
+    ]);
+    // Defer one tick so React paints the 0% bar before wasm starts.
+    await sleep(0);
+    const total = (game as any).database_populate_begin?.() as number;
+    if (!total || total <= 0) {
+      setEvaluatorBusy(false);
+      setDbProgress(null);
+      setLog((prev) => [...prev, 'Database populate could not start.']);
+      return;
+    }
+    // Pick a batch size so we yield ~10 times per second on a typical run.
+    // Smaller = smoother bar, larger = less overhead. 200k feels right.
+    const BATCH = 200_000;
+    let done = 0;
+    while (done < total) {
+      if (cancelDbPopulate.current) {
+        // User toggled the checkbox back off while loading.
+        (game as any).set_evaluator?.('search');
+        setDbProgress(null);
+        setUseDatabaseEvaluator(false);
         setEvaluatorBusy(false);
+        setLog((prev) => [...prev, 'Database populate cancelled.']);
+        return;
       }
-    }, 0);
+      const out = (game as any).database_populate_step?.(BATCH) as
+        | null
+        | { done: number; total: number; complete: boolean };
+      if (!out) break;
+      done = out.done;
+      setDbProgress(out.done / out.total);
+      // Yield to JS so the progress bar can repaint.
+      await sleep(0);
+      if (out.complete) break;
+    }
+    setUseDatabaseEvaluator(true);
+    setDbProgress(1);
+    setLog((prev) => [
+      ...prev,
+      `120⁴ database populate complete (${total.toLocaleString()} games).`,
+    ]);
+    refreshFromGame(game);
+    setEvaluatorBusy(false);
+    // Drop the progress bar after a brief pause.
+    setTimeout(() => setDbProgress(null), 800);
   }
 
   async function onRaise() {
@@ -551,14 +596,26 @@ const App = () => {
       <label className="debug-toggle">
         <input
           type="checkbox"
-          checked={useDatabaseEvaluator}
+          checked={useDatabaseEvaluator || evaluatorBusy}
           disabled={!game || evaluatorBusy}
           onChange={(e) => onToggleEvaluator(e.target.checked)}
           data-testid="toggle-db-evaluator"
         />
         Use full 120<sup>4</sup> database (slow)
-        {evaluatorBusy ? ' · loading…' : ''}
       </label>
+      {dbProgress !== null && (
+        <div className="db-progress" data-testid="db-progress">
+          <div className="db-progress-bar">
+            <div
+              className="db-progress-fill"
+              style={{ width: `${Math.round(dbProgress * 100)}%` }}
+            />
+          </div>
+          <span className="db-progress-label">
+            Loading 120⁴ database… <strong>{Math.round(dbProgress * 100)}%</strong>
+          </span>
+        </div>
+      )}
       {roundBanner && (
         <p className="round-banner" data-testid="round-banner">
           {roundBanner}
