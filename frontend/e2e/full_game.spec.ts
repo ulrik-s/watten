@@ -26,19 +26,6 @@ async function readRoundPoints(page: Page) {
   return parseInt(m[1], 10);
 }
 
-async function waitForHumanTurn(page: Page, timeoutMs = 25000): Promise<'turn' | 'gameover'> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if ((await page.locator('.game-over').count()) > 0) return 'gameover';
-    const concede = page.getByRole('button', { name: /Concede/ });
-    if (await concede.isEnabled()) return 'turn';
-    await page.waitForTimeout(150);
-  }
-  throw new Error('timed out waiting for human turn');
-}
-
-/** Wait until Team 2 has answered the raise (accept or fold). Returns the
- *  resolution mode. */
 async function waitForRaiseResolution(page: Page, timeoutMs = 10000): Promise<'accepted' | 'folded'> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -47,6 +34,20 @@ async function waitForRaiseResolution(page: Page, timeoutMs = 10000): Promise<'a
     await page.waitForTimeout(150);
   }
   throw new Error('timed out waiting for raise resolution');
+}
+
+/** Click selectable cards until none are visible. */
+async function clickThroughHand(page: Page, maxClicks = 25) {
+  for (let i = 0; i < maxClicks; i++) {
+    const card = page.locator(SELECTABLE).first();
+    try {
+      await card.waitFor({ state: 'visible', timeout: 3000 });
+    } catch {
+      return;
+    }
+    await card.click();
+    await page.waitForTimeout(120);
+  }
 }
 
 test('full game using card clicks, raise-with-response, concede, and the trick-winner UI', async ({ page }) => {
@@ -61,61 +62,48 @@ test('full game using card clicks, raise-with-response, concede, and the trick-w
     page.locator('.log').getByText(/Player \d wins the trick/).first()
   ).toBeVisible();
 
-  await waitForHumanTurn(page);
-
-  // === Raise + response — covers the propose-respond path ===
+  // === Raise + response — covers both accept and fold paths ===
   const ptsBefore = await readRoundPoints(page);
-  const scoresBefore = await readScores(page);
   await page.getByRole('button', { name: /Raise/ }).click();
   await expect(page.locator('.log').getByText(/Team 1 proposes to raise/)).toBeVisible();
   const resolution = await waitForRaiseResolution(page);
   if (resolution === 'accepted') {
     expect(await readRoundPoints(page)).toBe(ptsBefore + 1);
-    // Round continues — eventually concede so the round ends predictably.
-    await waitForHumanTurn(page);
-    const before2 = await readScores(page);
-    await page.getByRole('button', { name: /Concede/ }).click();
-    await expect
-      .poll(async () => (await readScores(page)).team2, { timeout: 10000 })
-      .toBeGreaterThanOrEqual(before2.team2 + ptsBefore + 1);
+    // Alternation: Team 1 cannot raise again immediately.
+    const raise = page.getByRole('button', { name: /Raise/ });
+    await expect(raise).toBeDisabled();
   } else {
-    // Folded: Team 1 was awarded the pre-raise points.
-    await expect
-      .poll(async () => (await readScores(page)).team1, { timeout: 10000 })
-      .toBeGreaterThanOrEqual(scoresBefore.team1 + ptsBefore);
+    // Folded: round-decided indicator must appear.
+    await expect(page.getByTestId('round-decided')).toBeVisible();
   }
 
-  // === Subsequent rounds — drive through concedes and raises ===
-  for (let round = 0; round < 25; round++) {
-    const state = await waitForHumanTurn(page);
-    if (state === 'gameover') break;
+  // === Whatever happened, the user MUST still play out their remaining
+  // cards manually — no auto-play. Click through them. ===
+  await clickThroughHand(page);
+
+  // === Subsequent rounds — drive a mix of concedes, raises, plays ===
+  for (let round = 0; round < 30; round++) {
     const s = await readScores(page);
     if (s.team1 >= s.target || s.team2 >= s.target) break;
+    if ((await page.locator('.game-over').count()) > 0) break;
 
-    if (round % 3 === 0) {
-      await page.getByRole('button', { name: /Concede/ }).click();
-    } else if (round % 3 === 1) {
-      // Try a raise, then whichever way it resolves, continue.
-      await page.getByRole('button', { name: /Raise/ }).click();
-      try {
-        const r = await waitForRaiseResolution(page, 8000);
-        if (r === 'accepted') {
-          await waitForHumanTurn(page);
-          const c = page.getByRole('button', { name: /Concede/ });
-          if (await c.isEnabled()) await c.click();
-        }
-        // folded → round already ended, loop continues.
-      } catch {
-        /* timeout: continue anyway */
-      }
-    } else {
-      // Play a card then concede.
-      await page.locator(SELECTABLE).first().click();
-      const next = await waitForHumanTurn(page);
-      if (next === 'gameover') break;
+    const pick = round % 4;
+    if (pick === 0) {
       const c = page.getByRole('button', { name: /Concede/ });
       if (await c.isEnabled()) await c.click();
+    } else if (pick === 1) {
+      const r = page.getByRole('button', { name: /Raise/ });
+      if (await r.isEnabled()) {
+        await r.click();
+        try {
+          await waitForRaiseResolution(page, 5000);
+        } catch {
+          /* ignore */
+        }
+      }
     }
+    // Either way: play out the rest of the hand.
+    await clickThroughHand(page);
   }
 
   // === Game must be over ===
@@ -123,10 +111,7 @@ test('full game using card clicks, raise-with-response, concede, and the trick-w
   const final = await readScores(page);
   expect(Math.max(final.team1, final.team2)).toBeGreaterThanOrEqual(final.target);
 
-  // The full log is kept in the DOM, so historical events from every
-  // feature should be present.
   await expect(page.locator('.log').getByText(/proposes to raise/).first()).toHaveCount(1);
-  // At least one of accept / fold must have been logged.
   const accepts = await page.locator('.log').getByText(/Team 2 accepts/).count();
   const folds = await page.locator('.log').getByText(/Team 2 folds/).count();
   expect(accepts + folds).toBeGreaterThan(0);

@@ -120,6 +120,12 @@ const App = () => {
   const [roundNumber, setRoundNumber] = useState(1);
   // Brief "Round N is starting" announcement that fades away after the deal.
   const [roundBanner, setRoundBanner] = useState<string | null>(null);
+  // Set once concede/fold locks the round winner. The user keeps clicking
+  // through their remaining cards, but the round outcome is fixed.
+  const [decidedFor, setDecidedFor] = useState<number | null>(null);
+  // Last team to have a raise accepted; the alternation rule blocks the
+  // same team from raising again until the other team raises.
+  const [lastRaiseBy, setLastRaiseBy] = useState<number | null>(null);
   // Position inside `trick` of the winning card, once a trick is full.
   // `null` while the trick is still being played out.
   const [trickWinnerPos, setTrickWinnerPos] = useState<number | null>(null);
@@ -304,6 +310,8 @@ const App = () => {
     trickRef.current = [];
     setTrick([]);
     setTrickWinnerPos(null);
+    setDecidedFor(null);
+    setLastRaiseBy(null);
     g.start_round_interactive();
     setTrump(g.trump_suit());
     setStriker(g.striker_rank());
@@ -343,12 +351,25 @@ const App = () => {
 
   async function onRaise() {
     if (!game || busy || gameOver) return;
+    if (decidedFor !== null) return;
+    // Alternation rule: Team 1 cannot raise twice in a row.
+    if (lastRaiseBy === 0) {
+      setLog((prev) => [
+        ...prev,
+        `Team 1 cannot raise — Team 2 must raise first.`,
+      ]);
+      return;
+    }
     setBusy(true);
     try {
       const before = (game as any).round_points?.() ?? roundPoints;
       const proposed = before + 1;
       const ok = (game as any).propose_raise?.(0);
       if (!ok) {
+        setLog((prev) => [
+          ...prev,
+          `Team 1 cannot raise right now.`,
+        ]);
         setBusy(false);
         return;
       }
@@ -359,7 +380,7 @@ const App = () => {
       await sleep(700);
       const outcome = ((game as any).auto_respond_raise?.() ?? null) as
         | null
-        | { accepted: true; new_value: number }
+        | { accepted: true; new_value: number; proposing_team?: number }
         | { accepted: false; winning_team: number; points: number; ended: boolean };
       if (!outcome) {
         setBusy(false);
@@ -367,17 +388,22 @@ const App = () => {
       }
       if (outcome.accepted) {
         setRoundPoints(outcome.new_value);
+        setLastRaiseBy(0);
         setLog((prev) => [
           ...prev,
           `Team 2 accepts. Round is now worth ${outcome.new_value}.`,
         ]);
         setBusy(false);
       } else {
+        // Fold: the proposing team (Team 1) wins the round at the pre-raise
+        // value. The hand is NOT auto-played — the user continues clicking
+        // through their remaining cards; the score lands at finish_round.
+        setDecidedFor(outcome.winning_team);
         setLog((prev) => [
           ...prev,
-          `Team 2 folds. Team ${outcome.winning_team + 1} is locked in for ${outcome.points} points; playing the round out.`,
+          `Team 2 folds. Team ${outcome.winning_team + 1} will take ${outcome.points} points when the round ends. Keep playing.`,
         ]);
-        await playOutRoundIfNeeded(game);
+        setBusy(false);
       }
     } catch (err) {
       setBusy(false);
@@ -387,18 +413,16 @@ const App = () => {
 
   async function onConcede() {
     if (!game || busy || gameOver) return;
+    if (decidedFor !== null) return;
     const ok = (game as any).concede_round?.(0);
     if (!ok) return;
+    setDecidedFor(1);
     setLog((prev) => [
       ...prev,
-      `Team 1 concedes; Team 2 is locked in for ${roundPoints} points. Playing the round out.`,
+      `Team 1 concedes. Team 2 will take ${roundPoints} points when the round ends. Keep playing.`,
     ]);
-    setBusy(true);
-    // Also drop selectability and evals so the user sees they're no longer
-    // in control.
-    setAllowedSlots(new Set());
-    setEvalBySlot(new Map());
-    await playOutRoundIfNeeded(game);
+    // No auto-play and no setBusy — the user keeps clicking through their
+    // remaining cards normally.
   }
 
   function renderOpponent(playerIdx: number, size: number, gridArea: string) {
@@ -435,13 +459,35 @@ const App = () => {
         </p>
       )}
       <div className="actions">
-        <button onClick={onRaise} disabled={!game || busy || !!gameOver}>
+        <button
+          onClick={onRaise}
+          disabled={
+            !game || busy || !!gameOver || decidedFor !== null || lastRaiseBy === 0
+          }
+          title={
+            lastRaiseBy === 0
+              ? 'Team 2 must raise first (alternation rule)'
+              : decidedFor !== null
+              ? 'Round outcome is already decided'
+              : ''
+          }
+        >
           Raise (+1)
         </button>
-        <button onClick={onConcede} disabled={!game || busy || !!gameOver}>
+        <button
+          onClick={onConcede}
+          disabled={!game || busy || !!gameOver || decidedFor !== null}
+          title={decidedFor !== null ? 'Round outcome is already decided' : ''}
+        >
           Concede round
         </button>
       </div>
+      {decidedFor !== null && (
+        <p className="round-decided" data-testid="round-decided">
+          Round outcome locked in: Team {decidedFor + 1} will take the round
+          when all cards are played.
+        </p>
+      )}
       {gameOver && (
         <p className="game-over">
           Game over. Team {gameOver.winner} wins {gameOver.final[0]}–{gameOver.final[1]}.

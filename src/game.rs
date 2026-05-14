@@ -179,6 +179,10 @@ pub struct GameState {
     /// remaining tricks still play out (a round is always 5 tricks), they
     /// just don't affect the result.
     round_decided: Option<usize>,
+    /// Whichever team most recently had a raise accepted. They cannot
+    /// propose another raise until the other team raises (the
+    /// alternation rule). Cleared at round start.
+    last_raise_by: Option<usize>,
     orig_hands: [[Card; TRICKS_PER_ROUND]; 4],
     played: [Vec<usize>; 4],
     /// Optional subset of permutation indices, applied when in Database mode.
@@ -223,6 +227,7 @@ impl GameState {
             round_points: ROUND_POINTS,
             pending_raise: None,
             round_decided: None,
+            last_raise_by: None,
             orig_hands: [[DUMMY_CARD; TRICKS_PER_ROUND]; 4],
             played: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             perm_range: None,
@@ -318,6 +323,7 @@ impl GameState {
         self.round_points = ROUND_POINTS;
         self.pending_raise = None;
         self.round_decided = None;
+        self.last_raise_by = None;
         let mut cards = deck();
         shuffle(&mut cards);
         for p in self.players.iter_mut() {
@@ -401,19 +407,27 @@ impl GameState {
         idx == self.dealer || idx == (self.dealer + 1) % 4
     }
 
-    /// Return the indices that the given player is allowed to play
-    /// when `lead_card` was led. This enforces the rule that seeing
-    /// players must play trump or striker when a trick is started
-    /// with a trump card.
+    /// A card counts as a "trump" in Watten if it is in the trump suit, is
+    /// the Weli (Weli is always trump regardless of suit), or has the
+    /// striker rank (the four Schläge, of which one is the Rechte).
+    pub fn is_trump_like(c: &Card, rechte: Card) -> bool {
+        c.suit == rechte.suit || c.rank == Rank::Weli || c.rank == rechte.rank
+    }
+
+    /// Return the indices that the given player is allowed to play when
+    /// `lead_card` was led. Enforces the "seeing players must follow
+    /// trump" rule: if the lead is a trump (trump-suit, Weli, or
+    /// striker-rank) and the player is a seeing player (dealer or
+    /// forehand), they must play a trump if they hold one.
     pub fn allowed_indices(&self, p_idx: usize, lead_card: Card) -> Vec<usize> {
         let mut allowed: Vec<usize> = (0..self.players[p_idx].hand.len()).collect();
         if let Some(rechte) = self.rechte {
-            if lead_card.suit == rechte.suit && self.is_seeing_player(p_idx) {
+            if Self::is_trump_like(&lead_card, rechte) && self.is_seeing_player(p_idx) {
                 let subset: Vec<usize> = self.players[p_idx]
                     .hand
                     .iter()
                     .enumerate()
-                    .filter(|(_, c)| c.suit == rechte.suit || c.rank == rechte.rank)
+                    .filter(|(_, c)| Self::is_trump_like(c, rechte))
                     .map(|(i, _)| i)
                     .collect();
                 if !subset.is_empty() {
@@ -491,6 +505,14 @@ impl GameState {
         if !self.playing_round {
             return Err("round not in progress");
         }
+        if self.round_decided.is_some() {
+            return Err("round outcome is already decided");
+        }
+        if self.last_raise_by == Some(team) {
+            // Alternation rule: once a team's raise has been accepted, that
+            // team cannot raise again until the opposing team has raised.
+            return Err("the other team must raise first");
+        }
         match self.pending_raise {
             None => {
                 self.pending_raise = Some(team);
@@ -523,6 +545,9 @@ impl GameState {
         if accept {
             self.round_points += 1;
             self.pending_raise = None;
+            // Alternation lock: this proposing team cannot raise again
+            // until the other team has raised.
+            self.last_raise_by = Some(proposing);
             Ok(RaiseOutcome::Accepted {
                 proposing_team: proposing,
                 new_value: self.round_points,
@@ -1063,7 +1088,9 @@ mod tests {
     }
 
     #[test]
-    fn teams_can_raise_alternating() {
+    fn raise_alternation_rule() {
+        // After Team 1's raise is accepted Team 1 cannot raise again until
+        // Team 2 has raised; then Team 1 can raise once more.
         let mut g = GameState::new(0);
         g.playing_round = true;
         assert_eq!(g.round_points, ROUND_POINTS);
@@ -1071,17 +1098,44 @@ mod tests {
         assert!(g.propose_raise(0).is_ok());
         assert!(g.respond_to_raise(1, true).is_ok());
         assert_eq!(g.round_points, ROUND_POINTS + 1);
-        // Team 1 can't propose again immediately — they were the last to raise.
-        // (But our state machine allows propose_raise after accept; the
-        // alternation comes from the other team being the only valid responder
-        // to a fresh proposal.)
+        // Team 1 cannot raise again immediately — Team 2 must raise first.
+        assert!(g.propose_raise(0).is_err());
+        // Team 2 raises, Team 1 accepts.
         assert!(g.propose_raise(1).is_ok());
         assert!(g.respond_to_raise(0, true).is_ok());
         assert_eq!(g.round_points, ROUND_POINTS + 2);
-        // Can't propose while another is pending.
+        // Team 2 now cannot raise again until Team 1 does.
+        assert!(g.propose_raise(1).is_err());
+        // Team 1 raises again, Team 2 accepts.
         assert!(g.propose_raise(0).is_ok());
-        assert!(g.propose_raise(0).is_err()); // already pending
-        assert!(g.propose_raise(1).is_err()); // other team can't override
+        assert!(g.respond_to_raise(1, true).is_ok());
+        assert_eq!(g.round_points, ROUND_POINTS + 3);
+        // Team 1 is locked out again.
+        assert!(g.propose_raise(0).is_err());
+    }
+
+    #[test]
+    fn cannot_propose_raise_while_one_is_pending() {
+        let mut g = GameState::new(0);
+        g.playing_round = true;
+        assert!(g.propose_raise(0).is_ok());
+        // Same team double-proposes: rejected (raise is pending).
+        assert!(g.propose_raise(0).is_err());
+        // Other team can't propose while a raise is pending either.
+        assert!(g.propose_raise(1).is_err());
+    }
+
+    #[test]
+    fn cannot_raise_after_round_decided() {
+        let mut g = GameState::new(0);
+        g.playing_round = true;
+        // Team 1 proposes, Team 2 folds — Team 1 wins (round_decided).
+        assert!(g.propose_raise(0).is_ok());
+        let _ = g.respond_to_raise(1, false).unwrap();
+        assert_eq!(g.round_decided(), Some(0));
+        // No further raises by either team while round_decided is set.
+        assert!(g.propose_raise(0).is_err());
+        assert!(g.propose_raise(1).is_err());
     }
 
     #[test]
@@ -1195,6 +1249,90 @@ mod tests {
         assert_eq!(a0, vec![0]);
         let a1 = g.allowed_indices(1, lead);
         assert_eq!(a1, vec![0]);
+    }
+
+    #[test]
+    fn weli_counts_as_trump_for_must_follow() {
+        use Rank::*;
+        use Suit::*;
+        let mut g = GameState::new(0);
+        g.dealer = 0;
+        // Trump is Hearts, striker is Unter. Weli (Bells of Weli) is NOT in
+        // the trump suit but is always trump.
+        g.rechte = Some(Card::new(Hearts, Unter));
+
+        // Player 0 (dealer = seeing) holds Weli + a non-trump.
+        g.players[0].hand = vec![
+            Card::new(Bells, Weli),     // Weli — always trump
+            Card::new(Leaves, Seven),   // not trump
+        ];
+
+        // Lead is a trump-suit card → seeing players must follow trump.
+        let lead = Card::new(Hearts, Ten);
+        let a = g.allowed_indices(0, lead);
+        // Only the Weli (slot 0) counts as trump, so it must be played.
+        assert_eq!(a, vec![0]);
+    }
+
+    #[test]
+    fn lead_weli_triggers_must_follow_rule() {
+        use Rank::*;
+        use Suit::*;
+        let mut g = GameState::new(0);
+        g.dealer = 0;
+        g.rechte = Some(Card::new(Hearts, Unter));
+
+        g.players[0].hand = vec![
+            Card::new(Hearts, Ace),   // trump
+            Card::new(Acorns, King),  // not trump
+        ];
+
+        // Player 1 leads Weli (Bells of Weli) — that IS a trump even though
+        // its suit isn't Hearts.
+        let lead = Card::new(Bells, Weli);
+        let a = g.allowed_indices(0, lead);
+        // Player 0 is a seeing player and holds the trump Hearts Ace, so they
+        // must play it.
+        assert_eq!(a, vec![0]);
+    }
+
+    #[test]
+    fn lead_striker_triggers_must_follow_rule() {
+        use Rank::*;
+        use Suit::*;
+        let mut g = GameState::new(0);
+        g.dealer = 0;
+        g.rechte = Some(Card::new(Hearts, Unter));
+
+        g.players[0].hand = vec![
+            Card::new(Hearts, King),   // trump
+            Card::new(Acorns, Ace),    // not trump
+        ];
+
+        // Player 1 leads a striker in a non-trump suit (Leaves Unter).
+        let lead = Card::new(Leaves, Unter);
+        let a = g.allowed_indices(0, lead);
+        // Seeing player must play their trump.
+        assert_eq!(a, vec![0]);
+    }
+
+    #[test]
+    fn non_seeing_player_has_no_must_follow_obligation() {
+        use Rank::*;
+        use Suit::*;
+        let mut g = GameState::new(0);
+        g.dealer = 0; // Player 0 dealer; players 0 and 1 are seeing.
+        g.rechte = Some(Card::new(Hearts, Unter));
+
+        g.players[2].hand = vec![
+            Card::new(Hearts, Ace),
+            Card::new(Bells, King),
+        ];
+
+        let lead = Card::new(Hearts, Ten);
+        let a = g.allowed_indices(2, lead);
+        // Player 2 is NOT seeing — both cards remain legal.
+        assert_eq!(a, vec![0, 1]);
     }
 
     #[test]

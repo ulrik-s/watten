@@ -11,6 +11,22 @@ async function waitForReady(page: Page) {
   await page.locator(SELECTABLE).first().waitFor({ state: 'visible', timeout: 30000 });
 }
 
+/** Click any selectable cards until the human's hand is empty or the round
+ *  rolls over. Used to drive a round to its natural end after a concede /
+ *  fold when the engine no longer auto-plays. */
+async function clickHandToEnd(page: Page, maxClicks = 30) {
+  for (let i = 0; i < maxClicks; i++) {
+    const card = page.locator(SELECTABLE).first();
+    try {
+      await card.waitFor({ state: 'visible', timeout: 3000 });
+    } catch {
+      return;
+    }
+    await card.click();
+    await page.waitForTimeout(120);
+  }
+}
+
 async function readRoundPoints(page: Page): Promise<number> {
   const text = await page.locator('p', { hasText: /Round worth:/ }).first().innerText();
   const m = text.match(/Round worth:\s*(\d+)/);
@@ -85,14 +101,15 @@ test.describe('widgets', () => {
     }
   });
 
-  test('Concede locks in Team 2 and credits the opponent after the round plays out', async ({ page }) => {
+  test('Concede locks in Team 2; user plays out remaining cards; scores then credit Team 2', async ({ page }) => {
     test.setTimeout(120000);
     await waitForReady(page);
     const before = await readScores(page);
     await page.getByRole('button', { name: /Concede/ }).click();
-    // Concede no longer credits the opponent immediately — it locks the
-    // winner and the engine plays out the remaining tricks. Scores update
-    // once the round completes (≤ ~30s for a full 5-trick playthrough).
+    // The round-decided indicator should appear, and the user keeps clicking.
+    await expect(page.getByTestId('round-decided')).toBeVisible({ timeout: 5000 });
+    await clickHandToEnd(page);
+    // Score only lands at finish_round, after the user has played out their hand.
     await expect
       .poll(async () => (await readScores(page)).team2, { timeout: 60000 })
       .toBeGreaterThanOrEqual(before.team2 + 2);
@@ -172,31 +189,34 @@ test.describe('widgets', () => {
   });
 
   test('Final score banner appears after concede flurry', async ({ page }) => {
-    test.setTimeout(600000); // up to 10 min — concedes auto-play 5 tricks each
+    test.setTimeout(180000);
     await waitForReady(page);
-    // Concede repeatedly until the game ends. Each concede now plays the
-    // round out to completion before the next deal, so we wait generously
-    // for the button to re-enable between rounds.
+    // Each round: concede, then click through the human's remaining cards
+    // to drive the round to its natural end. Repeat until the game ends.
     const concede = page.getByRole('button', { name: /Concede/ });
     for (let i = 0; i < 30; i++) {
       const s = await readScores(page);
       if (s.team1 >= s.target || s.team2 >= s.target) break;
       try {
-        await expect(concede).toBeEnabled({ timeout: 60000 });
+        await expect(concede).toBeEnabled({ timeout: 10000 });
       } catch {
         break;
       }
       await concede.click();
-      // Wait until either the button is re-enabled (next round ready) or
-      // the game-over banner appears. The full round playthrough plus the
-      // round-gap takes roughly 25–40 seconds.
+      await clickHandToEnd(page);
+      // Wait until the next round's deal is ready (concede button re-enabled),
+      // or the game ends.
       await Promise.race([
-        page.locator('.game-over').waitFor({ state: 'visible', timeout: 60000 }),
-        concede.elementHandle().then((h) =>
-          page.waitForFunction((el) => el && !(el as HTMLButtonElement).disabled, h, {
-            timeout: 60000,
-          })
-        ),
+        page.locator('.game-over').waitFor({ state: 'visible', timeout: 10000 }),
+        concede
+          .elementHandle()
+          .then((h) =>
+            page.waitForFunction(
+              (el) => el && !(el as HTMLButtonElement).disabled,
+              h,
+              { timeout: 10000 }
+            )
+          ),
       ]).catch(() => undefined);
     }
     await expect(page.locator('.game-over')).toBeVisible({ timeout: 10000 });

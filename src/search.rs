@@ -45,6 +45,10 @@ fn is_seeing(player: u8, dealer: u8) -> bool {
     player == dealer || player == (dealer + 1) % 4
 }
 
+fn is_trump_like(c: &Card, rechte: Card) -> bool {
+    c.suit == rechte.suit || c.rank == Rank::Weli || c.rank == rechte.rank
+}
+
 fn legal_follow_mask(
     orig_hands: &[[Card; TRICKS_PER_ROUND]; 4],
     remaining_mask: u8,
@@ -53,14 +57,14 @@ fn legal_follow_mask(
     dealer: u8,
     rechte: Card,
 ) -> u8 {
-    if lead_card.suit == rechte.suit && is_seeing(player, dealer) {
+    if is_trump_like(&lead_card, rechte) && is_seeing(player, dealer) {
         let mut subset = 0u8;
         for i in 0..TRICKS_PER_ROUND {
             if remaining_mask & (1 << i) == 0 {
                 continue;
             }
             let c = orig_hands[player as usize][i];
-            if c.suit == rechte.suit || c.rank == rechte.rank || c.rank == Rank::Weli {
+            if is_trump_like(&c, rechte) {
                 subset |= 1 << i;
             }
         }

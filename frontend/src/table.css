@@ -32,6 +32,17 @@ h1 {
   animation: pop 0.3s ease-out;
 }
 
+.round-decided {
+  background: rgba(120, 200, 255, 0.18);
+  border: 1px solid rgba(120, 200, 255, 0.5);
+  color: #b0e2ff;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  display: inline-block;
+  margin: 4px 0 8px;
+}
+
 .round-banner {
   background: rgba(255, 224, 102, 0.18);
   border: 1px solid rgba(255, 224, 102, 0.55);

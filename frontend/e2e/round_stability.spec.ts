@@ -92,25 +92,33 @@ test('the human must play exactly 5 cards (5 clicks) to finish a round', async (
   await expect.poll(() => readRoundNumber(page), { timeout: 30000 }).toBe(startRound + 1);
 });
 
-test('after a concede, every hand drains to zero before the next deal', async ({ page }) => {
+test('after a concede, the user still has to click through their remaining cards before the next deal', async ({ page }) => {
   test.setTimeout(120000);
   await waitForReady(page);
 
   const startRound = await readRoundNumber(page);
+  expect((await snapshotHand(page)).filter((s) => s.filled).length).toBe(5);
 
-  // Concede right after the round starts.
+  // Concede right after the round starts. Round outcome should be locked,
+  // but the round counter must NOT roll over yet — the user still has 5
+  // cards to play.
   await page.getByRole('button', { name: /Concede/ }).click();
+  await expect(page.getByTestId('round-decided')).toBeVisible();
+  expect(await readRoundNumber(page)).toBe(startRound);
+  expect((await snapshotHand(page)).filter((s) => s.filled).length).toBe(5);
 
-  // Wait until the round actually changes (= new deal happened).
-  await expect.poll(() => readRoundNumber(page), { timeout: 60000 }).toBe(startRound + 1);
+  // Now click through the human's hand. After 5 clicks the round should end
+  // and the counter advance.
+  for (let i = 0; i < 5; i++) {
+    const card = page.locator('.hand-slot .card.selectable').first();
+    await card.waitFor({ state: 'visible', timeout: 10000 });
+    await card.click();
+    await page.waitForTimeout(150);
+  }
 
-  // The new round should be a fresh 5-card hand.
+  await expect.poll(() => readRoundNumber(page), { timeout: 30000 }).toBe(startRound + 1);
   const after = await snapshotHand(page);
   expect(after.filter((s) => s.filled).length).toBe(5);
-
-  // The play-to-completion invariant is implicit: the round counter only
-  // advances when finish_round fires, which only fires when every hand is
-  // empty. Reaching this assertion proves it.
 });
 
 test('played slots stay empty until the round actually ends (no mid-round redeal)', async ({ page }) => {
