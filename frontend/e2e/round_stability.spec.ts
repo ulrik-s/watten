@@ -4,7 +4,7 @@ const SELECTABLE = '.hand-slot .card.selectable';
 const HAND_SLOT = '.hand-slot';
 
 async function waitForReady(page: Page) {
-  await page.goto('/');
+  await page.goto('/?fast=1');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Watten');
   await page.locator(SELECTABLE).first().waitFor({ state: 'visible', timeout: 30000 });
 }
@@ -51,6 +51,34 @@ async function readScores(page: Page) {
   if (!m) throw new Error('Cannot parse: ' + text);
   return { team1: parseInt(m[1], 10), team2: parseInt(m[2], 10), target: parseInt(m[3], 10) };
 }
+
+async function readRoundNumber(page: Page): Promise<number> {
+  const text = await page.locator('p').filter({ hasText: /^Round\s+/ }).first().innerText();
+  const m = text.match(/Round\s+(\d+)/);
+  if (!m) throw new Error('cannot parse round number: ' + text);
+  return parseInt(m[1], 10);
+}
+
+test('after a concede, every hand drains to zero before the next deal', async ({ page }) => {
+  test.setTimeout(120000);
+  await waitForReady(page);
+
+  const startRound = await readRoundNumber(page);
+
+  // Concede right after the round starts.
+  await page.getByRole('button', { name: /Concede/ }).click();
+
+  // Wait until the round actually changes (= new deal happened).
+  await expect.poll(() => readRoundNumber(page), { timeout: 60000 }).toBe(startRound + 1);
+
+  // The new round should be a fresh 5-card hand.
+  const after = await snapshotHand(page);
+  expect(after.filter((s) => s.filled).length).toBe(5);
+
+  // The play-to-completion invariant is implicit: the round counter only
+  // advances when finish_round fires, which only fires when every hand is
+  // empty. Reaching this assertion proves it.
+});
 
 test('played slots stay empty until the round actually ends (no mid-round redeal)', async ({ page }) => {
   test.setTimeout(120000);

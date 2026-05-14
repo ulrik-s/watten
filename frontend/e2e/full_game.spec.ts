@@ -3,7 +3,7 @@ import { test, expect, Page } from '@playwright/test';
 const SELECTABLE = '.hand-slot .card.selectable';
 
 async function waitForReady(page: Page) {
-  await page.goto('/');
+  await page.goto('/?fast=1');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Watten');
   await page.locator(SELECTABLE).first().waitFor({ state: 'visible', timeout: 30000 });
 }

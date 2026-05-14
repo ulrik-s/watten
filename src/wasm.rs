@@ -187,9 +187,57 @@ impl WasmGame {
         }
     }
 
-    /// Concede the current round on behalf of `team`. Returns true on success.
+    /// Concede the current round on behalf of `team`. The round outcome is
+    /// locked in but the cards still need to play out — call
+    /// [`Self::auto_play_round`] right after to drive the remaining tricks.
+    /// Returns true if the concede was accepted.
     pub fn concede_round(&mut self, team: usize) -> bool {
         self.inner.concede_round(team).is_ok()
+    }
+
+    /// Play out the rest of the round automatically (bot logic for every
+    /// player including the human). Returns the same `JsRoundStep[]` shape
+    /// as `play_round_logged` / `advance_bots`, plus a flag indicating
+    /// whether the round actually ended.
+    pub fn auto_play_round(&mut self) -> JsValue {
+        let steps = self.inner.auto_play_round();
+        let js_steps: Vec<JsRoundStep> = steps
+            .into_iter()
+            .map(|s| JsRoundStep {
+                player: s.player,
+                hand: s
+                    .hand
+                    .iter()
+                    .map(|c| JsCard {
+                        suit: c.suit,
+                        rank: c.rank,
+                    })
+                    .collect(),
+                allowed: s.allowed,
+                played: JsCard {
+                    suit: s.played.suit,
+                    rank: s.played.rank,
+                },
+            })
+            .collect();
+        // round_ended is true iff playing_round flipped off (finish_round was
+        // hit). The caller uses this to know when to deal a new round.
+        let ended = !self.inner.playing_round;
+        #[derive(serde::Serialize)]
+        struct Out {
+            ended: bool,
+            steps: Vec<JsRoundStep>,
+        }
+        swb::to_value(&Out {
+            ended,
+            steps: js_steps,
+        })
+        .unwrap_or(JsValue::NULL)
+    }
+
+    /// True iff the round outcome has been locked in (concede/fold).
+    pub fn round_decided(&self) -> Option<usize> {
+        self.inner.round_decided()
     }
 
     pub fn round_points(&self) -> usize {

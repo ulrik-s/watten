@@ -175,6 +175,10 @@ pub struct GameState {
     /// Team that has an outstanding raise proposal awaiting the other team's
     /// response, if any.
     pending_raise: Option<usize>,
+    /// `Some(team)` once the round's winner is fixed by concede/fold. The
+    /// remaining tricks still play out (a round is always 5 tricks), they
+    /// just don't affect the result.
+    round_decided: Option<usize>,
     orig_hands: [[Card; TRICKS_PER_ROUND]; 4],
     played: [Vec<usize>; 4],
     /// Optional subset of permutation indices, applied when in Database mode.
@@ -218,6 +222,7 @@ impl GameState {
             scores: [0, 0],
             round_points: ROUND_POINTS,
             pending_raise: None,
+            round_decided: None,
             orig_hands: [[DUMMY_CARD; TRICKS_PER_ROUND]; 4],
             played: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             perm_range: None,
@@ -312,6 +317,7 @@ impl GameState {
     pub fn start_round(&mut self) {
         self.round_points = ROUND_POINTS;
         self.pending_raise = None;
+        self.round_decided = None;
         let mut cards = deck();
         shuffle(&mut cards);
         for p in self.players.iter_mut() {
@@ -522,11 +528,12 @@ impl GameState {
                 new_value: self.round_points,
             })
         } else {
+            // Fold: the proposing team's win is locked in at the pre-raise
+            // round value, but the round continues being played out so the
+            // "5 tricks per round" invariant holds.
             let points = self.round_points;
             self.pending_raise = None;
-            self.scores[proposing] += points;
-            self.playing_round = false;
-            self.dealer = (self.dealer + 1) % 4;
+            self.round_decided = Some(proposing);
             Ok(RaiseOutcome::Folded {
                 winning_team: proposing,
                 points,
@@ -579,23 +586,59 @@ impl GameState {
         }
     }
 
-    /// Concede the current round on behalf of `team`: the opposing team
-    /// receives the current `round_points` and the round ends. Caller must
-    /// then [`Self::start_round`] (or [`Self::start_round_interactive`]) for
-    /// the next deal. Returns `GameResult` describing the awarded round.
+    /// Concede the current round on behalf of `team`: the opposing team is
+    /// locked in as the winner of the round at the current `round_points`,
+    /// but the cards are still played out — the round always lasts 5
+    /// tricks. Callers typically follow this with [`Self::auto_play_round`]
+    /// to animate the remaining plays. The round actually ends (deal next)
+    /// only when all hands are empty.
     pub fn concede_round(&mut self, team: usize) -> Result<GameResult, &'static str> {
         if team > 1 {
             return Err("invalid team");
         }
+        if !self.playing_round {
+            return Err("round not in progress");
+        }
+        if self.round_decided.is_some() {
+            return Err("round outcome is already decided");
+        }
         let winner_team = 1 - team;
-        self.scores[winner_team] += self.round_points;
-        self.playing_round = false;
-        self.dealer = (self.dealer + 1) % 4;
+        self.round_decided = Some(winner_team);
         Ok(if winner_team == 0 {
             GameResult::Team1Win
         } else {
             GameResult::Team2Win
         })
+    }
+
+    /// True iff every player has at least one card left to play.
+    fn hands_remaining(&self) -> bool {
+        self.players.iter().any(|p| !p.hand.is_empty())
+    }
+
+    /// Whether the round outcome has been locked in (concede/fold).
+    pub fn round_decided(&self) -> Option<usize> {
+        self.round_decided
+    }
+
+    /// Play out every remaining card using the bot move evaluator for *all*
+    /// players, including humans. Returns the sequence of plays. Used to
+    /// animate the rest of the round after a concede or a raise-fold so the
+    /// "round = 5 tricks" invariant is preserved.
+    pub fn auto_play_round(&mut self) -> Vec<RoundStep> {
+        let mut log = Vec::new();
+        while self.playing_round && self.hands_remaining() {
+            let p = self.current_player();
+            let allowed = self.current_allowed();
+            if allowed.is_empty() {
+                break;
+            }
+            let trick = self.current_trick.clone();
+            let tricks_won = self.tricks_won;
+            let idx = self.best_card_index_with_trick(p, &allowed, &trick, tricks_won);
+            self.play_internal(p, idx, &mut log);
+        }
+        log
     }
 
     #[allow(unused_assignments)]
@@ -822,16 +865,17 @@ impl GameState {
     fn finish_round(&mut self) {
         self.playing_round = false;
         self.dealer = (self.dealer + 1) % 4;
-        let result = if self.tricks_won[0] > self.tricks_won[1] {
-            GameResult::Team1Win
-        } else {
-            GameResult::Team2Win
-        };
-        match result {
-            GameResult::Team1Win => self.scores[0] += self.round_points,
-            GameResult::Team2Win => self.scores[1] += self.round_points,
-            _ => {}
-        }
+        // If the round was decided by concede/fold the winner is fixed;
+        // otherwise it's the team that took more tricks.
+        let winner_team = self.round_decided.unwrap_or_else(|| {
+            if self.tricks_won[0] > self.tricks_won[1] {
+                0
+            } else {
+                1
+            }
+        });
+        self.scores[winner_team] += self.round_points;
+        self.round_decided = None;
     }
 
     fn advance_bots_internal(&mut self, record: &mut Vec<RoundStep>) -> Option<GameResult> {
@@ -948,7 +992,7 @@ mod tests {
     }
 
     #[test]
-    fn concede_round_awards_round_points_to_other_team() {
+    fn concede_locks_in_round_decided_without_ending_round() {
         let mut g = GameState::new(0);
         g.playing_round = true;
         assert!(g.propose_raise(0).is_ok());
@@ -964,8 +1008,14 @@ mod tests {
         assert_eq!(g.round_points, ROUND_POINTS + 2);
         let result = g.concede_round(0).unwrap();
         assert_eq!(result, GameResult::Team2Win);
-        assert_eq!(g.scores, [0, ROUND_POINTS + 2]);
-        assert_eq!(g.dealer, 1);
+        // Concede locks the winner but does NOT update scores yet — the
+        // round still has to be played out (5 tricks total). Scores land
+        // when finish_round fires.
+        assert_eq!(g.scores, [0, 0]);
+        assert_eq!(g.round_decided(), Some(1));
+        assert!(g.playing_round);
+        // Conceding twice or after a decision is rejected.
+        assert!(g.concede_round(0).is_err());
     }
 
     #[test]
@@ -991,7 +1041,7 @@ mod tests {
     }
 
     #[test]
-    fn propose_then_fold_ends_round_at_pre_raise_value() {
+    fn propose_then_fold_locks_in_round_decided_at_pre_raise_value() {
         let mut g = GameState::new(0);
         g.playing_round = true;
         assert!(g.propose_raise(0).is_ok());
@@ -1003,10 +1053,12 @@ mod tests {
                 points
             } if points == ROUND_POINTS
         ));
-        // Pre-raise value awarded; round_points itself did NOT go up.
-        assert_eq!(g.scores, [ROUND_POINTS, 0]);
+        // Round value did not go up; scores have not been credited yet —
+        // the round is still in progress (a round is always 5 tricks).
+        assert_eq!(g.scores, [0, 0]);
         assert_eq!(g.round_points, ROUND_POINTS);
-        assert!(!g.playing_round);
+        assert!(g.playing_round);
+        assert_eq!(g.round_decided(), Some(0));
         assert_eq!(g.pending_raise(), None);
     }
 

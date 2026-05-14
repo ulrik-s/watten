@@ -30,9 +30,16 @@ interface TrickEntry {
 
 const NUM_PLAYERS = 4;
 const CARDS_PER_HAND = 5;
-const STEP_MS = 320;            // delay between each animated card play
-const TRICK_HOLD_MS = 1900;     // how long a completed trick + winner lingers
-const ROUND_GAP_MS = 1800;      // extra pause before dealing a new round
+
+// `?fast=1` query param trims the animation delays so E2E tests can drive
+// the full round-by-round play-out in a reasonable time. Real users get
+// the normal pacing.
+const FAST_MODE =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('fast') === '1';
+const STEP_MS = FAST_MODE ? 10 : 320;
+const TRICK_HOLD_MS = FAST_MODE ? 50 : 1900;
+const ROUND_GAP_MS = FAST_MODE ? 50 : 1800;
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -211,6 +218,20 @@ const App = () => {
           next[s.player] = Math.max(0, next[s.player] - 1);
           return next;
         });
+      } else {
+        // Player 0 = human. Manual plays null the slot pre-emptively in
+        // `play()`, but auto-play also produces steps for the human, so
+        // empty their slot here when we still have one matching the card.
+        const slotIdx = slotsRef.current.findIndex(
+          (c) =>
+            c !== null && c.suit === s.played.suit && c.rank === s.played.rank
+        );
+        if (slotIdx >= 0) {
+          slotsRef.current = slotsRef.current.map((c, i) =>
+            i === slotIdx ? null : c
+          );
+          setSlots([...slotsRef.current]);
+        }
       }
 
       if (nextTrick.length === NUM_PLAYERS) {
@@ -300,6 +321,24 @@ const App = () => {
     setBusy(false);
   }
 
+  async function playOutRoundIfNeeded(g: WasmGame) {
+    // After concede/fold the engine knows the winner; finish the round by
+    // animating every remaining card before dealing a new one.
+    const out = (g as any).auto_play_round?.() as
+      | null
+      | { ended: boolean; steps: JsRoundStep[] };
+    if (!out) return;
+    if (out.steps && out.steps.length > 0) {
+      await processStepsAnimated(out.steps);
+    }
+    if (out.ended) {
+      await handleRoundEnded(g);
+    } else {
+      refreshFromGame(g);
+      setBusy(false);
+    }
+  }
+
   async function onRaise() {
     if (!game || busy || gameOver) return;
     setBusy(true);
@@ -315,7 +354,6 @@ const App = () => {
         ...prev,
         `Team 1 proposes to raise the round to ${proposed} — Team 2 is thinking…`,
       ]);
-      // Brief pause so the user reads the proposal before the bot answers.
       await sleep(700);
       const outcome = ((game as any).auto_respond_raise?.() ?? null) as
         | null
@@ -335,9 +373,9 @@ const App = () => {
       } else {
         setLog((prev) => [
           ...prev,
-          `Team 2 folds. Team ${outcome.winning_team + 1} takes ${outcome.points} points.`,
+          `Team 2 folds. Team ${outcome.winning_team + 1} is locked in for ${outcome.points} points; playing the round out.`,
         ]);
-        await handleRoundEnded(game);
+        await playOutRoundIfNeeded(game);
       }
     } catch (err) {
       setBusy(false);
@@ -349,9 +387,16 @@ const App = () => {
     if (!game || busy || gameOver) return;
     const ok = (game as any).concede_round?.(0);
     if (!ok) return;
-    setLog((prev) => [...prev, `Team 1 concedes; Team 2 takes ${roundPoints} points`]);
+    setLog((prev) => [
+      ...prev,
+      `Team 1 concedes; Team 2 is locked in for ${roundPoints} points. Playing the round out.`,
+    ]);
     setBusy(true);
-    await handleRoundEnded(game);
+    // Also drop selectability and evals so the user sees they're no longer
+    // in control.
+    setAllowedSlots(new Set());
+    setEvalBySlot(new Map());
+    await playOutRoundIfNeeded(game);
   }
 
   function renderOpponent(playerIdx: number, size: number, gridArea: string) {

@@ -4,11 +4,10 @@ const HAND_CARD = '.hand-slot .card';
 const SELECTABLE = '.hand-slot .card.selectable';
 
 async function waitForReady(page: Page) {
-  // The loader text in index.html is replaced once React mounts.
-  await page.goto('/');
+  // ?fast=1 shortens animation delays so the suite still completes quickly
+  // even though concede/fold now play the round out to completion.
+  await page.goto('/?fast=1');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Watten');
-  // Wait for at least one playable card to appear — that means wasm has loaded
-  // and the bots have advanced to the human's first move.
   await page.locator(SELECTABLE).first().waitFor({ state: 'visible', timeout: 30000 });
 }
 
@@ -74,14 +73,16 @@ test.describe('widgets', () => {
     }
   });
 
-  test('Concede ends the round and credits the opponent', async ({ page }) => {
-    test.setTimeout(60000);
+  test('Concede locks in Team 2 and credits the opponent after the round plays out', async ({ page }) => {
+    test.setTimeout(120000);
     await waitForReady(page);
     const before = await readScores(page);
     await page.getByRole('button', { name: /Concede/ }).click();
-    // Concede credits team 2 with at least the round-worth (≥ 2).
+    // Concede no longer credits the opponent immediately — it locks the
+    // winner and the engine plays out the remaining tricks. Scores update
+    // once the round completes (≤ ~30s for a full 5-trick playthrough).
     await expect
-      .poll(async () => (await readScores(page)).team2, { timeout: 10000 })
+      .poll(async () => (await readScores(page)).team2, { timeout: 60000 })
       .toBeGreaterThanOrEqual(before.team2 + 2);
   });
 
@@ -159,26 +160,29 @@ test.describe('widgets', () => {
   });
 
   test('Final score banner appears after concede flurry', async ({ page }) => {
-    test.setTimeout(180000);
+    test.setTimeout(600000); // up to 10 min — concedes auto-play 5 tricks each
     await waitForReady(page);
-    // Concede repeatedly until the game ends. Each concede gives the opponent
-    // round_points (>= 2). After a concede the React app waits TRICK_DISPLAY_MS
-    // (800ms) before starting the next round, so wait for the button to be
-    // enabled again rather than guessing.
+    // Concede repeatedly until the game ends. Each concede now plays the
+    // round out to completion before the next deal, so we wait generously
+    // for the button to re-enable between rounds.
     const concede = page.getByRole('button', { name: /Concede/ });
     for (let i = 0; i < 30; i++) {
       const s = await readScores(page);
       if (s.team1 >= s.target || s.team2 >= s.target) break;
-      await expect(concede).toBeEnabled({ timeout: 5000 }).catch(() => undefined);
-      if (await concede.isDisabled()) break;
+      try {
+        await expect(concede).toBeEnabled({ timeout: 60000 });
+      } catch {
+        break;
+      }
       await concede.click();
-      // Wait until either the button is re-enabled (next round ready) or the
-      // game-over banner appears.
+      // Wait until either the button is re-enabled (next round ready) or
+      // the game-over banner appears. The full round playthrough plus the
+      // round-gap takes roughly 25–40 seconds.
       await Promise.race([
-        page.locator('.game-over').waitFor({ state: 'visible', timeout: 5000 }),
+        page.locator('.game-over').waitFor({ state: 'visible', timeout: 60000 }),
         concede.elementHandle().then((h) =>
           page.waitForFunction((el) => el && !(el as HTMLButtonElement).disabled, h, {
-            timeout: 5000,
+            timeout: 60000,
           })
         ),
       ]).catch(() => undefined);

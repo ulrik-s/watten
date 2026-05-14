@@ -100,3 +100,40 @@ fn raising_points_and_full_round() {
     assert_eq!(result, watten::GameResult::Team1Win);
     assert_eq!(g.scores, [watten::game::ROUND_POINTS + 2, 0]);
 }
+
+#[test]
+fn concede_locks_in_winner_and_round_plays_to_completion() {
+    // Drive a full interactive round: start, concede right away, then have
+    // the engine auto-play every remaining card. Verify that no new deal
+    // happens until every hand is empty, and that the conceded team
+    // receives exactly round_points at finish_round time.
+    let mut g = watten::game::GameState::new(0);
+    g.start_round_interactive();
+    let dealer_at_start = g.dealer;
+    // Every player has 5 cards immediately after a deal.
+    for p in 0..4 {
+        assert_eq!(g.players[p].hand.len(), 5);
+    }
+    // Team 1 concedes right away.
+    let _ = g.concede_round(0).unwrap();
+    assert_eq!(g.round_decided(), Some(1));
+    // Scores must not have moved yet, and the round is still in progress.
+    assert_eq!(g.scores, [0, 0]);
+    assert!(g.playing_round);
+    // Cards have not been re-dealt: every player still has the same 5 cards.
+    for p in 0..4 {
+        assert_eq!(g.players[p].hand.len(), 5);
+    }
+    // Play out the round automatically (bot picks for every player).
+    let steps = g.auto_play_round();
+    // 20 plays total (5 tricks × 4 players).
+    assert_eq!(steps.len(), 20);
+    // Round has ended and the dealer rotated.
+    assert!(!g.playing_round);
+    assert_eq!(g.dealer, (dealer_at_start + 1) % 4);
+    // Team 2 got the conceded points (round_points stayed at the default
+    // because nobody raised).
+    assert_eq!(g.scores, [0, watten::game::ROUND_POINTS]);
+    // round_decided cleared on finish.
+    assert_eq!(g.round_decided(), None);
+}
