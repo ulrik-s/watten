@@ -61,14 +61,56 @@ test.describe('widgets', () => {
     await waitForReady(page);
     const beforeLogLines = await page.locator('.log > div').count();
     await page.locator(SELECTABLE).first().click();
-    // After a click, the human's play is appended to the log and the bots
-    // may immediately advance through the rest of the trick (and possibly
-    // future tricks); the log monotonically grows.
     await expect
       .poll(() => page.locator('.log > div').count(), { timeout: 10000 })
       .toBeGreaterThan(beforeLogLines);
-    // Some "Player N plays X" line should be visible.
     await expect(page.locator('.log').getByText(/Player \d plays /).first()).toBeVisible();
+  });
+
+  test('Clicked card disappears from its slot (and other slots stay put)', async ({ page }) => {
+    test.setTimeout(60000);
+    await waitForReady(page);
+    // Find the first selectable slot index and capture every slot's
+    // card identity (suit+rank) before the click.
+    const slots = page.locator('.hand-slot');
+    const total = await slots.count();
+    expect(total).toBe(5);
+
+    const before: Array<{ filled: boolean; key: string }> = [];
+    let firstSelectableSlot = -1;
+    for (let i = 0; i < total; i++) {
+      const slot = slots.nth(i);
+      const card = slot.locator('.card');
+      const placeholder = await slot.locator('.placeholder').count();
+      if (placeholder > 0) {
+        before.push({ filled: false, key: 'empty' });
+        continue;
+      }
+      const rank = (await card.locator('.rank').innerText()).trim();
+      // suit is the <img alt> on a real card; fall back to src path.
+      const suitSrc = (await card.locator('img').getAttribute('src')) ?? '';
+      before.push({ filled: true, key: `${rank}-${suitSrc}` });
+      const isSel = await card.evaluate((el) => el.classList.contains('selectable'));
+      if (isSel && firstSelectableSlot < 0) firstSelectableSlot = i;
+    }
+    expect(firstSelectableSlot).toBeGreaterThanOrEqual(0);
+
+    await slots.nth(firstSelectableSlot).locator('.card.selectable').click();
+
+    // The clicked slot should become a placeholder *immediately* (optimistic).
+    await expect(
+      slots.nth(firstSelectableSlot).locator('.placeholder')
+    ).toBeVisible({ timeout: 2000 });
+
+    // Other previously-filled slots should still hold the same card identity.
+    for (let i = 0; i < total; i++) {
+      if (i === firstSelectableSlot) continue;
+      if (!before[i].filled) continue;
+      const card = slots.nth(i).locator('.card');
+      const rank = (await card.locator('.rank').innerText()).trim();
+      const suitSrc = (await card.locator('img').getAttribute('src')) ?? '';
+      expect(`${rank}-${suitSrc}`).toBe(before[i].key);
+    }
   });
 
   test('Win-rate hints render per playable card', async ({ page }) => {
