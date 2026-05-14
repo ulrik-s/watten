@@ -110,6 +110,20 @@ impl WasmGame {
         self.inner.striker_rank().map(|r| r.to_string())
     }
 
+    /// Returns the Rechte (the unique trump-suit + striker-rank card) as
+    /// `{suit, rank}` using the same variant names as the cards in
+    /// `hand(...)`. Returns null before a round has been started.
+    pub fn rechte(&self) -> JsValue {
+        match self.inner.rechte {
+            Some(c) => swb::to_value(&JsCard {
+                suit: c.suit,
+                rank: c.rank,
+            })
+            .unwrap_or(JsValue::NULL),
+            None => JsValue::NULL,
+        }
+    }
+
     pub fn scores(&self) -> Vec<usize> {
         self.inner.scores.to_vec()
     }

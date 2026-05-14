@@ -43,8 +43,9 @@ h1 {
   display: grid;
   grid-template-columns: 140px 1fr 140px;
   grid-template-areas:
-    '.   p3     .  '
-    'p2  center p4 '
+    '.    p3      .  '
+    'p2   center  p4 '
+    'banner banner banner'
     'hand hand   hand';
   gap: 14px 14px;
   justify-items: center;
@@ -57,6 +58,7 @@ h1 {
 .table .p4 { grid-area: p4; }
 .table .center { grid-area: center; }
 .table .hand { grid-area: hand; }
+.table .trick-banner-wrap { grid-area: banner; min-height: 28px; }
 
 .player {
   display: flex;
@@ -111,9 +113,33 @@ h1 {
   animation: cardIn 0.22s ease-out;
 }
 
+.trick-slot.winner .card {
+  box-shadow: 0 0 0 3px #ffe066, 0 0 18px rgba(255, 224, 102, 0.6);
+  transform: translateY(-3px) scale(1.04);
+}
+
+.trick-slot.winner .trick-label {
+  color: #ffe066;
+  font-weight: bold;
+  opacity: 1;
+}
+
 .trick-label {
   font-size: 11px;
   opacity: 0.75;
+  transition: color 0.2s ease;
+}
+
+.trick-banner {
+  background: rgba(255, 224, 102, 0.18);
+  border: 1px solid rgba(255, 224, 102, 0.55);
+  color: #ffe066;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  animation: pop 0.2s ease-out;
 }
 
 /* Human hand: always render CARDS_PER_HAND slots. */

@@ -30,13 +30,62 @@ interface TrickEntry {
 
 const NUM_PLAYERS = 4;
 const CARDS_PER_HAND = 5;
-const STEP_MS = 220;            // delay between each animated card play
-const TRICK_HOLD_MS = 900;      // how long a completed trick lingers
-
-const cardKey = (c: JsCard) => `${c.suit}-${c.rank}`;
+const STEP_MS = 320;            // delay between each animated card play
+const TRICK_HOLD_MS = 1900;     // how long a completed trick + winner lingers
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
+}
+
+// Mirrors the Rust card_strength logic so we can mark the trick winner.
+const RANK_VALUES: Record<string, number> = {
+  Seven: 1,
+  Eight: 2,
+  Nine: 3,
+  Ten: 4,
+  Unter: 5,
+  Ober: 6,
+  King: 7,
+  Ace: 8,
+  Weli: 9,
+};
+
+function cardStrength(
+  card: JsCard,
+  leadSuit: string,
+  rechte: JsCard,
+  position: number
+): number {
+  let base: number;
+  if (card.suit === rechte.suit && card.rank === rechte.rank) {
+    base = 200;
+  } else if (card.rank === 'Weli') {
+    base = 180;
+  } else if (card.rank === rechte.rank) {
+    base = 190;
+  } else if (card.suit === rechte.suit) {
+    base = 100 + (RANK_VALUES[card.rank] ?? 0);
+  } else if (card.suit === leadSuit) {
+    base = 50 + (RANK_VALUES[card.rank] ?? 0);
+  } else {
+    base = RANK_VALUES[card.rank] ?? 0;
+  }
+  return base * 10 - position;
+}
+
+function trickWinnerIndex(trick: TrickEntry[], rechte: JsCard | null): number {
+  if (!rechte || trick.length === 0) return 0;
+  const leadSuit = trick[0].card.suit;
+  let bestPos = 0;
+  let bestScore = cardStrength(trick[0].card, leadSuit, rechte, 0);
+  for (let pos = 1; pos < trick.length; pos++) {
+    const s = cardStrength(trick[pos].card, leadSuit, rechte, pos);
+    if (s > bestScore) {
+      bestScore = s;
+      bestPos = pos;
+    }
+  }
+  return bestPos;
 }
 
 const App = () => {
@@ -60,9 +109,22 @@ const App = () => {
   const [winningPoints, setWinningPoints] = useState(15);
   const [gameOver, setGameOver] = useState<null | { winner: 1 | 2; final: [number, number] }>(null);
   const [busy, setBusy] = useState(false);
+  // Position inside `trick` of the winning card, once a trick is full.
+  // `null` while the trick is still being played out.
+  const [trickWinnerPos, setTrickWinnerPos] = useState<number | null>(null);
+  const [rechte, setRechte] = useState<JsCard | null>(null);
 
   // Authoritative trick state used by the animation loop.
   const trickRef = useRef<TrickEntry[]>([]);
+  const logRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll the log to its bottom whenever a new entry lands so the
+  // latest event is in view.
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [log]);
 
   useEffect(() => {
     init().then(() => {
@@ -72,6 +134,7 @@ const App = () => {
       setGame(g);
       setTrump(g.trump_suit());
       setStriker(g.striker_rank());
+      setRechte(((g as any).rechte?.() ?? null) as JsCard | null);
       // Capture the original 5-card hand for the human.
       const orig = g.hand(0) as JsCard[];
       slotsRef.current = padSlots(orig);
@@ -134,6 +197,9 @@ const App = () => {
         : [...trickRef.current, { card: s.played, player: s.player }];
       trickRef.current = nextTrick;
       setTrick(nextTrick);
+      // The winner halo only appears once the trick is full; starting a new
+      // trick clears it.
+      setTrickWinnerPos(null);
 
       if (s.player !== 0) {
         setOpponentHandSizes((prev) => {
@@ -143,8 +209,16 @@ const App = () => {
         });
       }
 
-      const justCompleted = nextTrick.length === NUM_PLAYERS;
-      await sleep(justCompleted ? TRICK_HOLD_MS : STEP_MS);
+      if (nextTrick.length === NUM_PLAYERS) {
+        // Trick completed: highlight the winner and announce it, then hold.
+        const winnerPos = trickWinnerIndex(nextTrick, rechte);
+        const winnerPlayer = nextTrick[winnerPos].player;
+        setTrickWinnerPos(winnerPos);
+        setLog((prev) => [...prev, `Player ${winnerPlayer + 1} wins the trick`]);
+        await sleep(TRICK_HOLD_MS);
+      } else {
+        await sleep(STEP_MS);
+      }
     }
   }
 
@@ -154,34 +228,23 @@ const App = () => {
     if (!allowedSlots.has(slotIdx)) return;
     setBusy(true);
 
-    const played = slotsRef.current[slotIdx]!;
+    // Compute the current-hand index for wasm BEFORE nulling the slot.
     const currentIdx = slotToCurrentIdx(slotIdx, slotsRef.current);
 
-    // Optimistic: null the played slot immediately.
+    // Optimistic hand-slot removal: the player gets instant feedback that
+    // their click registered.
     slotsRef.current = slotsRef.current.map((c, i) => (i === slotIdx ? null : c));
     setSlots([...slotsRef.current]);
     setAllowedSlots(new Set());
     setEvalBySlot(new Map());
 
-    // Show the played card in the trick area straight away.
-    trickRef.current =
-      trickRef.current.length >= NUM_PLAYERS
-        ? [{ card: played, player: 0 }]
-        : [...trickRef.current, { card: played, player: 0 }];
-    setTrick([...trickRef.current]);
-    setLog((prev) => [
-      ...prev,
-      `Player 1 plays ${played.rank} of ${played.suit}`,
-    ]);
-    await sleep(STEP_MS);
-
+    // Drive the actual play through wasm, then animate every returned step
+    // (human + bots) uniformly so the trick-winner highlight always fires.
     const [res, steps] = game.human_play(currentIdx) as [
       number | null,
       JsRoundStep[]
     ];
-    // The first step is the human play we already animated; skip it.
-    const botSteps = steps.length > 0 ? steps.slice(1) : steps;
-    await processStepsAnimated(botSteps);
+    await processStepsAnimated(steps);
 
     if (res !== null) {
       await handleRoundEnded(game);
@@ -205,8 +268,10 @@ const App = () => {
     g.start_round_interactive();
     trickRef.current = [];
     setTrick([]);
+    setTrickWinnerPos(null);
     setTrump(g.trump_suit());
     setStriker(g.striker_rank());
+    setRechte(((g as any).rechte?.() ?? null) as JsCard | null);
     setOpponentHandSizes([5, 5, 5, 5]);
     const orig = g.hand(0) as JsCard[];
     slotsRef.current = padSlots(orig);
@@ -281,17 +346,31 @@ const App = () => {
         <div className="center">
           {Array.from({ length: NUM_PLAYERS }).map((_, i) => {
             const t = trick[i];
+            const isWinner = trickWinnerPos === i;
             return (
-              <div key={i} className="trick-slot">
+              <div
+                key={i}
+                className={`trick-slot${isWinner ? ' winner' : ''}`}
+              >
                 {t ? (
                   <>
                     <CardView suit={t.card.suit} rank={t.card.rank} />
-                    <div className="trick-label">P{t.player + 1}</div>
+                    <div className="trick-label">
+                      P{t.player + 1}
+                      {isWinner ? ' ★' : ''}
+                    </div>
                   </>
                 ) : null}
               </div>
             );
           })}
+        </div>
+        <div className="trick-banner-wrap">
+          {trickWinnerPos !== null && trick[trickWinnerPos] ? (
+            <div className="trick-banner" data-testid="trick-winner">
+              Player {trick[trickWinnerPos].player + 1} wins the trick
+            </div>
+          ) : null}
         </div>
         <div className="player hand">
           {slots.map((c, slotIdx) => {
@@ -318,9 +397,9 @@ const App = () => {
           })}
         </div>
       </div>
-      <div className="log">
-        {log.slice(-12).map((l, i) => (
-          <div key={`${log.length - 12 + i}-${l}`}>{l}</div>
+      <div className="log" ref={logRef}>
+        {log.map((l, i) => (
+          <div key={`${i}-${l}`}>{l}</div>
         ))}
       </div>
     </div>
