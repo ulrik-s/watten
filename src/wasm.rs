@@ -345,14 +345,16 @@ impl WasmGame {
         swb::to_value(&self.inner.human_allowed_indices()).unwrap()
     }
 
-    /// Returns `[{hand_idx, wins, total, rate}]` for the player whose turn it
-    /// is right now, restricted to legal moves.
+    /// Returns `[{hand_idx, wins, total, illegal, rate}]` for the player
+    /// whose turn it is. `total = wins + losses` (legal completions);
+    /// `illegal` is non-zero only under the Database evaluator.
     pub fn human_move_evaluations(&self) -> JsValue {
         #[derive(Serialize)]
         struct JsEval {
             hand_idx: usize,
             wins: u32,
             total: u32,
+            illegal: u32,
             rate: f64,
         }
         let evals: Vec<JsEval> = self
@@ -363,6 +365,7 @@ impl WasmGame {
                 hand_idx: e.hand_idx,
                 wins: e.wins,
                 total: e.total,
+                illegal: e.illegal,
                 rate: e.rate(),
             })
             .collect();

@@ -152,6 +152,7 @@ impl MoveEvaluator for SearchEvaluator {
                     hand_idx: hi,
                     wins: e.wins,
                     total: e.total,
+                    illegal: 0, // search only explores legal continuations
                 })
             })
             .collect()
@@ -306,6 +307,7 @@ impl MoveEvaluator for DatabaseEvaluator {
                 .counts_in_lists(&lists[0], &lists[1], &lists[2], &lists[3]);
             let wins = counts[win_result];
             let losses = counts[loss_result];
+            let illegal = counts[GameResult::RuleViolation as usize];
             let hi = match current_hand_idx_for_orig(
                 ctx.orig_hands,
                 ctx.player,
@@ -319,6 +321,7 @@ impl MoveEvaluator for DatabaseEvaluator {
                 hand_idx: hi,
                 wins,
                 total: wins + losses,
+                illegal,
             });
         }
         out

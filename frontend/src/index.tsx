@@ -20,6 +20,7 @@ interface MoveEval {
   hand_idx: number;
   wins: number;
   total: number;
+  illegal: number;
   rate: number;
 }
 
@@ -140,6 +141,8 @@ const App = () => {
   const [scores, setScores] = useState<[number, number]>([0, 0]);
   const [tricksThisRound, setTricksThisRound] = useState<[number, number]>([0, 0]);
   const [showDebug, setShowDebug] = useState(false);
+  const [useDatabaseEvaluator, setUseDatabaseEvaluator] = useState(false);
+  const [evaluatorBusy, setEvaluatorBusy] = useState(false);
   const [trump, setTrump] = useState<string | null>(null);
   const [striker, setStriker] = useState<string | null>(null);
   const [roundPoints, setRoundPoints] = useState(2);
@@ -403,6 +406,30 @@ const App = () => {
     }
   }
 
+  function onToggleEvaluator(useDb: boolean) {
+    if (!game || evaluatorBusy) return;
+    setEvaluatorBusy(true);
+    // Defer the actual switch one tick so the "loading…" indicator renders
+    // before wasm starts the (potentially long) DB populate.
+    setTimeout(() => {
+      try {
+        (game as any).set_evaluator?.(useDb ? 'database' : 'search');
+        setUseDatabaseEvaluator(useDb);
+        setLog((prev) => [
+          ...prev,
+          useDb
+            ? 'Switched to 120⁴ database evaluator (illegal plays counted).'
+            : 'Switched to fast search evaluator.',
+        ]);
+        // Re-pull the move evaluations so debug numbers reflect the new
+        // evaluator immediately.
+        refreshFromGame(game);
+      } finally {
+        setEvaluatorBusy(false);
+      }
+    }, 0);
+  }
+
   async function onRaise() {
     if (!game || busy || gameOver) return;
     if (decidedFor !== null) return;
@@ -520,6 +547,18 @@ const App = () => {
         />
         Show scores
       </label>
+      &nbsp;&nbsp;
+      <label className="debug-toggle">
+        <input
+          type="checkbox"
+          checked={useDatabaseEvaluator}
+          disabled={!game || evaluatorBusy}
+          onChange={(e) => onToggleEvaluator(e.target.checked)}
+          data-testid="toggle-db-evaluator"
+        />
+        Use full 120<sup>4</sup> database (slow)
+        {evaluatorBusy ? ' · loading…' : ''}
+      </label>
       {roundBanner && (
         <p className="round-banner" data-testid="round-banner">
           {roundBanner}
@@ -622,11 +661,20 @@ const App = () => {
                 <div className="card-rate">
                   {rate !== null && allowedSlots.has(slotIdx) ? `${rate}%` : ''}
                 </div>
-                {showDebug && c && rechte && (
-                  <div className="card-debug" data-testid="hand-debug">
-                    R:{roundScore(c, rechte)}
-                  </div>
-                )}
+                {showDebug && c && rechte && (() => {
+                  const me = evalBySlot.get(slotIdx);
+                  return (
+                    <div className="card-debug" data-testid="hand-debug">
+                      R:{roundScore(c, rechte)}
+                      {me ? (
+                        <>
+                          <br />W:{me.wins} L:{me.total - me.wins}
+                          {me.illegal > 0 ? <> I:{me.illegal}</> : null}
+                        </>
+                      ) : null}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}

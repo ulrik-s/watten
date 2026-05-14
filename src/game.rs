@@ -27,8 +27,14 @@ impl Default for Evaluator {
 pub struct MoveEvaluation {
     /// Index into the player's current hand vector.
     pub hand_idx: usize,
+    /// Games in which the player's team won.
     pub wins: u32,
+    /// `wins + losses` — i.e. legal completions only. `losses = total - wins`.
     pub total: u32,
+    /// Games where some seeing player failed to follow trump. Only the
+    /// 120^4 [`Evaluator::Database`] path reports non-zero values here;
+    /// the search evaluator only explores legal continuations.
+    pub illegal: u32,
 }
 
 impl MoveEvaluation {
@@ -38,6 +44,10 @@ impl MoveEvaluation {
         } else {
             self.wins as f64 / self.total as f64
         }
+    }
+
+    pub fn losses(&self) -> u32 {
+        self.total.saturating_sub(self.wins)
     }
 }
 
@@ -156,6 +166,7 @@ fn simulate_game(
     let mut pos = [0usize; 4];
     let mut lead = (dealer + 1) % 4;
     let mut tricks = [0usize; 2];
+    let is_seeing = |p: usize| p == dealer || p == (dealer + 1) % 4;
     for _ in 0..TRICKS_PER_ROUND {
         let lead_card = hands[lead][perms[lead][pos[lead]]];
         pos[lead] += 1;
@@ -163,6 +174,22 @@ fn simulate_game(
         for off in 1..4 {
             let idx = (lead + off) % 4;
             let card = hands[idx][perms[idx][pos[idx]]];
+            // Must-follow check: if a trump is led and a seeing player
+            // plays a non-trump card while still holding a trump-suit
+            // card in their *remaining* hand, this permutation produces
+            // an illegal game.
+            if lead_card.suit == rechte.suit
+                && is_seeing(idx)
+                && card.suit != rechte.suit
+            {
+                let has_trump_remaining =
+                    (pos[idx] + 1..TRICKS_PER_ROUND).any(|p| {
+                        hands[idx][perms[idx][p]].suit == rechte.suit
+                    });
+                if has_trump_remaining {
+                    return GameResult::RuleViolation;
+                }
+            }
             pos[idx] += 1;
             played.push((idx, card));
         }
@@ -283,8 +310,9 @@ impl GameState {
     }
 
     /// Select one of the bundled evaluators. The corresponding evaluator
-    /// instance is constructed immediately; existing per-round state on the
-    /// previous evaluator is discarded.
+    /// instance is constructed immediately. If a round is in progress, the
+    /// new evaluator's [`MoveEvaluator::prepare_round`] is also called so
+    /// queries against it return meaningful counts straight away.
     pub fn set_evaluator(&mut self, evaluator: Evaluator) {
         self.evaluator_kind = evaluator;
         self.evaluator = match evaluator {
@@ -298,6 +326,14 @@ impl GameState {
                 Box::new(db)
             }
         };
+        // If a round is already underway, prepare the new evaluator with the
+        // current deal so toggling mid-round just works.
+        if self.playing_round {
+            if let Some(rechte) = self.rechte {
+                self.evaluator
+                    .prepare_round(&self.orig_hands, self.dealer, rechte);
+            }
+        }
     }
 
     /// Inject a custom evaluator implementation. The `kind` reported by
@@ -1056,6 +1092,52 @@ mod tests {
     }
 
     #[test]
+    fn simulate_game_flags_illegal_must_follow_violations() {
+        use Rank::*;
+        use Suit::*;
+        // Trump = Hearts, striker = Unter.
+        let rechte = Card::new(Hearts, Unter);
+        // Dealer = 0 → seeing players are 0 and 1. Lead is player 1.
+        // Player 1 leads Hearts (trump). Player 0 is seeing and holds a
+        // trump-suit card in their later perm, but plays a non-trump first.
+        // That permutation must be reported as RuleViolation.
+        let hands = [
+            [
+                Card::new(Bells, Seven), // perm[0] = 0 → play non-trump first
+                Card::new(Hearts, Ace),  // a trump card still in hand
+                Card::new(Leaves, Seven),
+                Card::new(Acorns, Seven),
+                Card::new(Bells, Eight),
+            ],
+            [
+                Card::new(Hearts, Ten), // lead = trump suit
+                Card::new(Bells, King),
+                Card::new(Leaves, Ace),
+                Card::new(Bells, Nine),
+                Card::new(Acorns, Nine),
+            ],
+            [
+                Card::new(Acorns, King),
+                Card::new(Bells, Ace),
+                Card::new(Leaves, King),
+                Card::new(Acorns, Ten),
+                Card::new(Bells, Ober),
+            ],
+            [
+                Card::new(Acorns, Ober),
+                Card::new(Leaves, Nine),
+                Card::new(Hearts, Nine),
+                Card::new(Acorns, Eight),
+                Card::new(Hearts, Seven),
+            ],
+        ];
+        // Identity permutation for every player → P0 plays Bells Seven
+        // (non-trump) while holding Hearts Ace (trump). Must-follow violated.
+        let perms = [[0, 1, 2, 3, 4]; 4];
+        assert_eq!(simulate_game(&hands, perms, 0, rechte), GameResult::RuleViolation);
+    }
+
+    #[test]
     fn higher_trump_off_lead_still_beats_lower_trump_off_lead() {
         // Lead is a pure card; two trumps (off-lead-suit) follow. With
         // trick_score off-suit = rank_value (no +20), trump rank still
@@ -1396,12 +1478,14 @@ mod tests {
         // Re-apply evaluator so the new perm_range is observed.
         g.set_evaluator(Evaluator::Database);
         g.start_round();
-        // After populate, every legal candidate move should have total > 0.
+        // After populate, candidate moves should report some outcome — even
+        // if every game in the tiny perm_range was an illegal must-follow
+        // violation, the `illegal` counter will be non-zero.
         let p = (g.dealer + 1) % 4;
         let allowed: Vec<usize> = (0..g.players[p].hand.len()).collect();
         let evs = g.evaluate_moves(p, &allowed, &[], [0, 0]);
         assert!(!evs.is_empty());
-        assert!(evs.iter().any(|e| e.total > 0));
+        assert!(evs.iter().any(|e| e.total > 0 || e.illegal > 0));
     }
 
     #[test]
@@ -1431,6 +1515,7 @@ mod tests {
                         // First card looks like a winner; rest losers.
                         wins: if i == 0 { 10 } else { 0 },
                         total: 10,
+                        illegal: 0,
                     })
                     .collect()
             }

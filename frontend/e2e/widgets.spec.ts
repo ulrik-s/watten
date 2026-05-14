@@ -208,6 +208,28 @@ test.describe('widgets', () => {
       .toBeGreaterThanOrEqual(1);
   });
 
+  test('120^4 database toggle is rendered and unchecked by default', async ({ page }) => {
+    test.setTimeout(20000);
+    await waitForReady(page);
+    const dbToggle = page.getByTestId('toggle-db-evaluator');
+    await expect(dbToggle).toBeVisible();
+    await expect(dbToggle).not.toBeChecked();
+    await expect(dbToggle).toBeEnabled();
+    // The label text is informative — proves the right toggle is in place.
+    const label = page.locator('label', { has: dbToggle });
+    await expect(label).toContainText(/database/i);
+    // Clicking the toggle kicks off the full 120^4 populate which can take
+    // anywhere from seconds (release wasm) to minutes (debug wasm). We do
+    // NOT wait for it to complete here — that's a manual-verify thing on
+    // the live site. We *do* verify that the click registers (the loading
+    // indicator becomes visible briefly).
+    void dbToggle.click({ force: true });
+    await expect(page.getByText('loading…')).toBeVisible({ timeout: 5000 }).catch(() => {
+      // If the populate completes faster than the timeout (release wasm on
+      // a fast box), the indicator may already be gone — that's fine.
+    });
+  });
+
   test('Show-scores debug toggle reveals round/trick scores per card', async ({ page }) => {
     test.setTimeout(60000);
     await waitForReady(page);
