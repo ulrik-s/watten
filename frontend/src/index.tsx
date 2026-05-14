@@ -58,6 +58,20 @@ const RANK_VALUES: Record<string, number> = {
   Weli: 9,
 };
 
+// Friendly display string for a rank (matches the Rust Display impl).
+const RANK_DISPLAY: Record<string, string> = {
+  Seven: '7',
+  Eight: '8',
+  Nine: '9',
+  Ten: '10',
+  Unter: 'Unter',
+  Ober: 'Ober',
+  King: 'King',
+  Ace: 'Ace',
+  Weli: 'Weli',
+};
+const displayRank = (r: string): string => RANK_DISPLAY[r] ?? r;
+
 function cardStrength(
   card: JsCard,
   leadSuit: string,
@@ -133,6 +147,12 @@ const App = () => {
 
   // Authoritative trick state used by the animation loop.
   const trickRef = useRef<TrickEntry[]>([]);
+  // rechte mirrored in a ref so async closures (e.g. processStepsAnimated
+  // started from useEffect on first load) read the *latest* value rather
+  // than whatever was in state when the closure was captured. Without this,
+  // the displayed trick winner falls back to the lead because the initial
+  // render's `rechte` is still null when the first bots' steps animate.
+  const rechteRef = useRef<JsCard | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll the log to its bottom whenever a new entry lands so the
@@ -151,7 +171,9 @@ const App = () => {
       setGame(g);
       setTrump(g.trump_suit());
       setStriker(g.striker_rank());
-      setRechte(((g as any).rechte?.() ?? null) as JsCard | null);
+      const r = ((g as any).rechte?.() ?? null) as JsCard | null;
+      rechteRef.current = r;
+      setRechte(r);
       // Capture the original 5-card hand for the human.
       const orig = g.hand(0) as JsCard[];
       slotsRef.current = padSlots(orig);
@@ -205,7 +227,7 @@ const App = () => {
     for (const s of steps) {
       setLog((prev) => [
         ...prev,
-        `Player ${s.player + 1} plays ${s.played.rank} of ${s.played.suit}`,
+        `Player ${s.player + 1} plays ${displayRank(s.played.rank)} of ${s.played.suit}`,
       ]);
 
       const wasFull = trickRef.current.length >= NUM_PLAYERS;
@@ -242,7 +264,9 @@ const App = () => {
 
       if (nextTrick.length === NUM_PLAYERS) {
         // Trick completed: highlight the winner and announce it, then hold.
-        const winnerPos = trickWinnerIndex(nextTrick, rechte);
+        // Use the ref so this works on the very first round too (the state
+        // setRechte schedules wouldn't have committed yet otherwise).
+        const winnerPos = trickWinnerIndex(nextTrick, rechteRef.current);
         const winnerPlayer = nextTrick[winnerPos].player;
         setTrickWinnerPos(winnerPos);
         setLog((prev) => [...prev, `Player ${winnerPlayer + 1} wins the trick`]);
@@ -315,7 +339,9 @@ const App = () => {
     g.start_round_interactive();
     setTrump(g.trump_suit());
     setStriker(g.striker_rank());
-    setRechte(((g as any).rechte?.() ?? null) as JsCard | null);
+    const r = ((g as any).rechte?.() ?? null) as JsCard | null;
+    rechteRef.current = r;
+    setRechte(r);
     setOpponentHandSizes([5, 5, 5, 5]);
     const orig = g.hand(0) as JsCard[];
     slotsRef.current = padSlots(orig);
@@ -508,7 +534,7 @@ const App = () => {
               >
                 {t ? (
                   <>
-                    <CardView suit={t.card.suit} rank={t.card.rank} />
+                    <CardView suit={t.card.suit} rank={displayRank(t.card.rank)} />
                     <div className="trick-label">
                       P{t.player + 1}
                       {isWinner ? ' ★' : ''}
@@ -536,7 +562,7 @@ const App = () => {
                 {c ? (
                   <CardView
                     suit={c.suit}
-                    rank={c.rank}
+                    rank={displayRank(c.rank)}
                     selectable={selectable}
                     onClick={() => play(slotIdx)}
                   />

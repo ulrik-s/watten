@@ -81,9 +81,10 @@ test.describe('widgets', () => {
     if ((await page.locator('.log').getByText(/Team 2 accepts/).count()) > 0) {
       expect(await readRoundPoints(page)).toBe(beforePts + 1);
     } else {
-      // Folded: Team 1 is locked in for the pre-raise value, but the round
-      // is played to completion before the points actually land. Poll the
-      // score until it goes up.
+      // Folded: Team 1 is locked in. The user must still play out the
+      // remaining cards manually — drive that, then assert the score.
+      await expect(page.getByTestId('round-decided')).toBeVisible();
+      await clickHandToEnd(page);
       await expect
         .poll(
           async () => {
@@ -186,6 +187,68 @@ test.describe('widgets', () => {
       if (t.endsWith('%')) anyPercent = true;
     }
     expect(anyPercent).toBe(true);
+  });
+
+  test('Trick winner banner matches the strongest card on the table', async ({ page }) => {
+    test.setTimeout(60000);
+    // Run this one at normal speed so the winner highlight is on screen long
+    // enough to inspect; the other tests use ?fast=1.
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Watten');
+    await page.locator(SELECTABLE).first().waitFor({ state: 'visible', timeout: 30000 });
+
+    await page.locator(SELECTABLE).first().click();
+    await expect(page.getByTestId('trick-winner')).toBeVisible({ timeout: 12000 });
+
+    // Read trump/striker from the header.
+    const header = await page.locator('p').filter({ hasText: /^Round\s/ }).first().innerText();
+    const trumpMatch = header.match(/Trump:\s+(\w+)/);
+    const strikerMatch = header.match(/Striker:\s+([\w\d]+)/);
+    expect(trumpMatch).toBeTruthy();
+    expect(strikerMatch).toBeTruthy();
+    const trumpSuit = trumpMatch![1];
+    const strikerDisplay = strikerMatch![1];
+
+    // Capture all four trick cards + the winner flag *in one go* while the
+    // banner is still up.
+    const trickCards = await page.locator('.trick-slot').evaluateAll((slots) =>
+      (slots as HTMLElement[]).map((el) => {
+        const cardEl = el.querySelector('.card') as HTMLElement | null;
+        const rank = cardEl?.getAttribute('data-rank') ?? '';
+        const suit = cardEl?.getAttribute('data-suit') ?? '';
+        const winner = el.classList.contains('winner');
+        return { rank, suit, winner };
+      })
+    );
+    // Guard: make sure we captured a full trick.
+    expect(trickCards.filter((c) => c.rank !== '' && c.suit !== '').length).toBe(4);
+
+    // Independently compute the expected winner using the rules the user
+    // described.
+    const RANK_DISPLAY_TO_VALUE: Record<string, number> = {
+      '7': 1, '8': 2, '9': 3, '10': 4,
+      Unter: 5, Ober: 6, King: 7, Ace: 8, Weli: 9,
+    };
+    const leadSuit = trickCards[0].suit;
+    function score(c: { rank: string; suit: string }, pos: number): number {
+      if (c.suit === trumpSuit && c.rank === strikerDisplay) return 200 * 10 - pos; // rechte
+      if (c.rank === 'Weli') return 180 * 10 - pos;
+      if (c.rank === strikerDisplay) return 190 * 10 - pos;
+      if (c.suit === trumpSuit) return (100 + (RANK_DISPLAY_TO_VALUE[c.rank] ?? 0)) * 10 - pos;
+      if (c.suit === leadSuit) return (50 + (RANK_DISPLAY_TO_VALUE[c.rank] ?? 0)) * 10 - pos;
+      return (RANK_DISPLAY_TO_VALUE[c.rank] ?? 0) * 10 - pos;
+    }
+    let expectedWinner = 0;
+    let bestScore = score(trickCards[0], 0);
+    for (let i = 1; i < 4; i++) {
+      const s = score(trickCards[i], i);
+      if (s > bestScore) {
+        bestScore = s;
+        expectedWinner = i;
+      }
+    }
+    const uiWinner = trickCards.findIndex((c) => c.winner);
+    expect(uiWinner).toBe(expectedWinner);
   });
 
   test('Final score banner appears after concede flurry', async ({ page }) => {

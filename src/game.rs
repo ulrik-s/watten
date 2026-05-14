@@ -994,6 +994,65 @@ mod tests {
     }
 
     #[test]
+    fn pure_card_loses_to_trump() {
+        // Trump = Hearts, striker = Unter, rechte = Hearts Unter.
+        let rechte = Card::new(Suit::Hearts, Rank::Unter);
+        // Lead = Acorns Ace (pure off-suit, no striker/trump).
+        let lead = Suit::Acorns;
+        let pure_ace = Card::new(Suit::Acorns, Rank::Ace);
+        // A low trump beats a strong pure card.
+        let low_trump = Card::new(Suit::Hearts, Rank::Seven);
+        assert!(
+            card_strength(&low_trump, lead, rechte, 1)
+                > card_strength(&pure_ace, lead, rechte, 0),
+            "trump must beat pure"
+        );
+    }
+
+    #[test]
+    fn pure_card_loses_to_striker() {
+        let rechte = Card::new(Suit::Hearts, Rank::Unter);
+        let lead = Suit::Acorns;
+        let pure_ace = Card::new(Suit::Acorns, Rank::Ace);
+        // Striker = Unter in a non-trump suit.
+        let striker = Card::new(Suit::Bells, Rank::Unter);
+        assert!(
+            card_strength(&striker, lead, rechte, 1)
+                > card_strength(&pure_ace, lead, rechte, 0),
+            "striker must beat pure"
+        );
+    }
+
+    #[test]
+    fn higher_pure_same_suit_beats_lead() {
+        let rechte = Card::new(Suit::Hearts, Rank::Unter);
+        // Lead = Acorns Seven (low pure). Higher Acorns beats it.
+        let lead_card = Card::new(Suit::Acorns, Rank::Seven);
+        let higher = Card::new(Suit::Acorns, Rank::Ace);
+        let lead = Suit::Acorns;
+        assert!(
+            card_strength(&higher, lead, rechte, 1)
+                > card_strength(&lead_card, lead, rechte, 0),
+            "same-suit higher rank must beat the lead"
+        );
+    }
+
+    #[test]
+    fn off_suit_pure_loses_to_lead_pure() {
+        let rechte = Card::new(Suit::Hearts, Rank::Unter);
+        // Lead = Acorns Seven (pure, low).
+        let lead_card = Card::new(Suit::Acorns, Rank::Seven);
+        // Bells Ace is pure but off-suit and non-trump/striker → loses.
+        let off_ace = Card::new(Suit::Bells, Rank::Ace);
+        let lead = Suit::Acorns;
+        assert!(
+            card_strength(&lead_card, lead, rechte, 0)
+                > card_strength(&off_ace, lead, rechte, 1),
+            "off-suit pure card must NOT beat the lead pure card"
+        );
+    }
+
+    #[test]
     fn first_striker_played_beats_striker() {
         let rechte = Card::new(Suit::Hearts, Rank::Unter);
         let lead = Suit::Bells;

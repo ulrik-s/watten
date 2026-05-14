@@ -21,13 +21,18 @@ const suitMap: Record<string, string> = {
 
 export const CardView: React.FC<CardProps> = ({ suit, rank, faceDown, onClick, selectable }) => {
   return (
-    <div className={`card ${selectable ? 'selectable' : ''}`} onClick={onClick}>
+    <div
+      className={`card ${selectable ? 'selectable' : ''}`}
+      onClick={onClick}
+      data-suit={faceDown ? '' : suit}
+      data-rank={faceDown ? '' : rank}
+    >
       {faceDown ? (
         <div className="back" />
       ) : (
         <>
           <span className="rank">{rank}</span>
-          <img src={suitMap[suit]} className="suit" />
+          <img src={suitMap[suit]} className="suit" alt={suit} />
         </>
       )}
     </div>
