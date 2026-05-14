@@ -1,10 +1,48 @@
-use crate::database::{GameDatabase, InMemoryGameDatabase};
+use crate::evaluator::{DatabaseEvaluator, EvaluationContext, MoveEvaluator, SearchEvaluator};
 use crate::player::Player;
-use crate::{all_hand_orders, deck, perm_prefix_range, shuffle, Card, GameResult, Rank, Suit};
+use crate::{deck, shuffle, Card, GameResult, Rank, Suit};
 use num_cpus;
 use serde::Serialize;
 
-pub const WINNING_POINTS: usize = 13;
+/// Selector for the bundled evaluator strategies. For custom evaluators,
+/// call [`GameState::set_evaluator_impl`] with your own
+/// `Box<dyn MoveEvaluator>` instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Evaluator {
+    /// Memoized legal-completion search. Fast, default.
+    Search,
+    /// Brute-force 120^4 database population. Kept as a benchmarking
+    /// fallback and for cross-validation against the search.
+    Database,
+}
+
+impl Default for Evaluator {
+    fn default() -> Self {
+        Evaluator::Search
+    }
+}
+
+/// Win/total counts for one candidate move.
+#[derive(Debug, Clone, Copy)]
+pub struct MoveEvaluation {
+    /// Index into the player's current hand vector.
+    pub hand_idx: usize,
+    pub wins: u32,
+    pub total: u32,
+}
+
+impl MoveEvaluation {
+    pub fn rate(&self) -> f64 {
+        if self.total == 0 {
+            0.0
+        } else {
+            self.wins as f64 / self.total as f64
+        }
+    }
+}
+
+/// Default target score; standard Watten ranges 11..18 depending on variant.
+pub const WINNING_POINTS: usize = 15;
 pub const ROUND_POINTS: usize = 2;
 pub const TRICKS_PER_ROUND: usize = 5;
 
@@ -120,23 +158,29 @@ pub struct GameState {
     pub round_points: usize,
     /// Which team last raised the round points.
     last_raiser: Option<usize>,
-    pub db: Box<dyn GameDatabase>,
     orig_hands: [[Card; TRICKS_PER_ROUND]; 4],
     played: [Vec<usize>; 4],
-    /// Optional subset of permutation indices for populating the database
+    /// Optional subset of permutation indices, applied when in Database mode.
     perm_range: Option<Vec<usize>>,
-    /// Number of worker threads used to populate the database
+    /// Number of worker threads used by the Database evaluator
     workers: usize,
     /// Callback for progress updates during database population
     progress_cb: Option<Box<dyn Fn(u64)>>,
+    /// Tag indicating which bundled evaluator is active. Updated by
+    /// [`Self::set_evaluator`]. Custom implementations swap in via
+    /// [`Self::set_evaluator_impl`] and leave this at its previous value.
+    evaluator_kind: Evaluator,
+    /// The active move evaluator. Always populated; defaults to the search
+    /// evaluator.
+    evaluator: Box<dyn MoveEvaluator>,
+    /// When true, print round/trick narration to stdout (used by the CLI).
+    pub verbose: bool,
     // interactive round state
     playing_round: bool,
     trick_lead: usize,
     trick_pos: usize,
     tricks_won: [usize; 2],
     current_trick: Vec<(usize, Card)>,
-    /// Cache for card win rates to avoid repeated database lookups
-    rate_cache: std::cell::RefCell<std::collections::HashMap<u64, f64>>,
 }
 
 impl GameState {
@@ -157,18 +201,61 @@ impl GameState {
             scores: [0, 0],
             round_points: ROUND_POINTS,
             last_raiser: None,
-            db: Box::new(InMemoryGameDatabase::new()),
             orig_hands: [[DUMMY_CARD; TRICKS_PER_ROUND]; 4],
             played: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             perm_range: None,
             workers: num_cpus::get() * 2,
             progress_cb: None,
+            evaluator_kind: Evaluator::default(),
+            evaluator: Box::new(SearchEvaluator::new()),
+            verbose: false,
             playing_round: false,
             trick_lead: 0,
             trick_pos: 0,
             tricks_won: [0, 0],
             current_trick: Vec::new(),
-            rate_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// Select one of the bundled evaluators. The corresponding evaluator
+    /// instance is constructed immediately; existing per-round state on the
+    /// previous evaluator is discarded.
+    pub fn set_evaluator(&mut self, evaluator: Evaluator) {
+        self.evaluator_kind = evaluator;
+        self.evaluator = match evaluator {
+            Evaluator::Search => Box::new(SearchEvaluator::new()),
+            Evaluator::Database => {
+                let mut db = DatabaseEvaluator::new();
+                if let Some(ref r) = self.perm_range {
+                    db.perm_range = Some(r.clone());
+                }
+                db.workers = self.workers;
+                Box::new(db)
+            }
+        };
+    }
+
+    /// Inject a custom evaluator implementation. The `kind` reported by
+    /// [`Self::evaluator`] is unchanged so callers can still distinguish
+    /// between the bundled strategies.
+    pub fn set_evaluator_impl(&mut self, evaluator: Box<dyn MoveEvaluator>) {
+        self.evaluator = evaluator;
+    }
+
+    pub fn evaluator(&self) -> Evaluator {
+        self.evaluator_kind
+    }
+
+    pub fn evaluator_name(&self) -> &'static str {
+        self.evaluator.name()
+    }
+
+    fn rebuild_database_evaluator(&mut self) {
+        if matches!(self.evaluator_kind, Evaluator::Database) {
+            let mut db = DatabaseEvaluator::new();
+            db.perm_range = self.perm_range.clone();
+            db.workers = self.workers;
+            self.evaluator = Box::new(db);
         }
     }
 
@@ -176,34 +263,36 @@ impl GameState {
     /// a single permutation can dramatically speed up tests.
     pub fn set_perm_range_single(&mut self, idx: usize) {
         self.perm_range = Some(vec![idx]);
+        self.rebuild_database_evaluator();
     }
 
     /// Limit the permutation range used when populating the database to an
     /// explicit list of permutation indices.
     pub fn set_perm_range(&mut self, indices: Vec<usize>) {
         self.perm_range = Some(indices);
+        self.rebuild_database_evaluator();
     }
 
     /// Clear any permutation restriction so that all permutations are used
     /// again when populating the database.
     pub fn clear_perm_range(&mut self) {
         self.perm_range = None;
+        self.rebuild_database_evaluator();
     }
 
     /// Set the number of worker threads used when populating the database.
     pub fn set_workers(&mut self, workers: usize) {
         self.workers = workers.max(1);
+        self.rebuild_database_evaluator();
     }
 
-    /// Provide a callback that receives progress updates while the database is
-    /// being populated.
+    /// Progress-callback hook is kept for backwards compatibility with the
+    /// wasm bindings but is currently unused by either evaluator.
     pub fn set_progress_callback(&mut self, cb: Option<Box<dyn Fn(u64)>>) {
         self.progress_cb = cb;
     }
 
     pub fn start_round(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
-        let overall_start = std::time::Instant::now();
         self.round_points = ROUND_POINTS;
         self.last_raiser = None;
         let mut cards = deck();
@@ -225,17 +314,10 @@ impl GameState {
         let dealer_card = self.players[self.dealer].hand[0];
         let next_idx = (self.dealer + 1) % 4;
         let next_card = self.players[next_idx].hand[0];
-        self.rechte = Some(Card::new(dealer_card.suit, next_card.rank));
-        println!("Trump suit is {}", dealer_card.suit);
-        println!("Striker rank is {}", next_card.rank);
-        println!("Rechte is {}", self.rechte.unwrap());
-        #[cfg(not(target_arch = "wasm32"))]
-        let db_start = std::time::Instant::now();
-        self.populate_database();
-        #[cfg(not(target_arch = "wasm32"))]
-        println!("populate_database() took {:?}", db_start.elapsed());
-        #[cfg(not(target_arch = "wasm32"))]
-        println!("start_round() total time {:?}", overall_start.elapsed());
+        let rechte = Card::new(dealer_card.suit, next_card.rank);
+        self.rechte = Some(rechte);
+        self.evaluator
+            .prepare_round(&self.orig_hands, self.dealer, rechte);
     }
 
     pub fn start_round_interactive(&mut self) {
@@ -247,107 +329,40 @@ impl GameState {
         self.current_trick.clear();
     }
 
-    fn populate_database(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
-        let start = std::time::Instant::now();
-        self.db = Box::new(InMemoryGameDatabase::new());
-        let perms = all_hand_orders();
-        let rechte = self.rechte.unwrap();
-        let indices: Vec<usize> = if let Some(ref r) = self.perm_range {
-            r.clone()
-        } else {
-            (0..perms.len()).collect()
+    fn orig_idx_in_hand(&self, p_idx: usize, hand_idx: usize) -> usize {
+        let card = self.players[p_idx].hand[hand_idx];
+        self.find_orig_index(p_idx, card)
+    }
+
+    /// Evaluate every legal move for `p_idx` given the current trick state and
+    /// per-team trick counts. Dispatches to the active [`MoveEvaluator`].
+    pub fn evaluate_moves(
+        &self,
+        p_idx: usize,
+        allowed_hand_indices: &[usize],
+        current_trick: &[(usize, Card)],
+        tricks_won: [usize; 2],
+    ) -> Vec<MoveEvaluation> {
+        let rechte = match self.rechte {
+            Some(r) => r,
+            None => return Vec::new(),
         };
-
-        let workers = self.workers.max(1);
-        let total = (indices.len() as u64).pow(4);
-        println!(
-            "Populating database with {} permutations using {} workers ({} total plays)",
-            indices.len(),
-            workers,
-            total
-        );
-        let mut cb_opt = self.progress_cb.take();
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            use std::sync::mpsc::channel;
-            use std::thread;
-
-            let (tx, rx) = channel();
-            for worker_id in 0..workers {
-                println!("Starting worker {}", worker_id);
-                let tx = tx.clone();
-                let indices = indices.clone();
-                let hands = self.orig_hands;
-                let dealer = self.dealer;
-                let rechte = rechte;
-                let perms = perms.clone();
-                thread::spawn(move || {
-                    let len = indices.len();
-                    let total = len.pow(4);
-                    for n in (worker_id..total).step_by(workers) {
-                        let i1_idx = n / (len * len * len);
-                        let i2_idx = (n / (len * len)) % len;
-                        let i3_idx = (n / len) % len;
-                        let i4_idx = n % len;
-                        let i1 = indices[i1_idx];
-                        let i2 = indices[i2_idx];
-                        let i3 = indices[i3_idx];
-                        let i4 = indices[i4_idx];
-                        let result = play_hand(&hands, [i1, i2, i3, i4], dealer, rechte, &perms);
-                        tx.send((i1, i2, i3, i4, result)).unwrap();
-                    }
-                });
-            }
-            drop(tx);
-            let mut done = 0u64;
-            for (i1, i2, i3, i4, res) in rx {
-                self.db.set(i1, i2, i3, i4, res);
-                done += 1;
-                if let Some(ref cb) = cb_opt {
-                    cb(done);
-                }
-                if done % 1_000_000 == 0 || done == total {
-                    println!("Progress: {} / {}", done, total);
-                }
-                if done == total {
-                    break;
-                }
-            }
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            let mut done = 0u64;
-            for &i1 in &indices {
-                for &i2 in &indices {
-                    for &i3 in &indices {
-                        for &i4 in &indices {
-                            let result = play_hand(
-                                &self.orig_hands,
-                                [i1, i2, i3, i4],
-                                self.dealer,
-                                rechte,
-                                &perms,
-                            );
-                            self.db.set(i1, i2, i3, i4, result);
-                            done += 1;
-                            if let Some(ref cb) = cb_opt {
-                                cb(done);
-                            }
-                            if done % 1_000_000 == 0 || done == total {
-                                println!("Progress: {} / {}", done, total);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        self.progress_cb = cb_opt;
-        #[cfg(not(target_arch = "wasm32"))]
-        println!("populate_database finished in {:?}", start.elapsed());
+        let allowed_orig: Vec<usize> = allowed_hand_indices
+            .iter()
+            .map(|&hi| self.orig_idx_in_hand(p_idx, hi))
+            .collect();
+        let ctx = EvaluationContext {
+            orig_hands: &self.orig_hands,
+            played: &self.played,
+            dealer: self.dealer,
+            rechte,
+            player: p_idx,
+            current_hand: &self.players[p_idx].hand,
+            allowed_orig_indices: &allowed_orig,
+            current_trick,
+            tricks_won,
+        };
+        self.evaluator.evaluate_moves(&ctx)
     }
 
     fn find_orig_index(&self, p_idx: usize, card: Card) -> usize {
@@ -386,139 +401,46 @@ impl GameState {
         allowed
     }
 
-    pub fn best_card_index(&self, p_idx: usize, allowed: &[usize]) -> usize {
-        #[cfg(not(target_arch = "wasm32"))]
-        let timer = std::time::Instant::now();
-        let player = &self.players[p_idx];
-        let playable: Vec<usize> = allowed.to_vec();
-
-        let mut best_idx = playable[0];
+    pub fn best_card_index_with_trick(
+        &self,
+        p_idx: usize,
+        allowed: &[usize],
+        current_trick: &[(usize, Card)],
+        tricks_won: [usize; 2],
+    ) -> usize {
+        let evals = self.evaluate_moves(p_idx, allowed, current_trick, tricks_won);
+        let mut best_idx = allowed[0];
         let mut best_rate = -1.0f64;
-        for &idx in &playable {
-            let card = player.hand[idx];
-            let orig = self.find_orig_index(p_idx, card);
-            let mut lists: [Vec<usize>; 4] = std::array::from_fn(|_| Vec::new());
-            for i in 0..4 {
-                let mut prefix = self.played[i].clone();
-                if i == p_idx {
-                    prefix.push(orig);
-                }
-                let (s, e) = perm_prefix_range(&prefix);
-                if let Some(ref allowed_indices) = self.perm_range {
-                    lists[i] = allowed_indices
-                        .iter()
-                        .cloned()
-                        .filter(|&v| v >= s && v < e)
-                        .collect();
-                } else {
-                    lists[i] = (s..e).collect();
-                }
-            }
-            let counts = self
-                .db
-                .counts_in_lists(&lists[0], &lists[1], &lists[2], &lists[3]);
-            let team = p_idx % 2;
-            let wins = counts[if team == 0 {
-                GameResult::Team1Win as usize
-            } else {
-                GameResult::Team2Win as usize
-            }];
-            let losses = counts[if team == 0 {
-                GameResult::Team2Win as usize
-            } else {
-                GameResult::Team1Win as usize
-            }];
-            let total = wins + losses;
-            let rate = if total == 0 {
-                0.0
-            } else {
-                wins as f64 / total as f64
-            };
+        for e in &evals {
+            let rate = e.rate();
             if rate > best_rate {
                 best_rate = rate;
-                best_idx = idx;
+                best_idx = e.hand_idx;
             }
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        println!(
-            "best_card_index for player {} took {:?}",
-            p_idx,
-            timer.elapsed()
-        );
         best_idx
     }
 
-    fn card_win_rate(&self, p_idx: usize, hand_idx: usize) -> f64 {
-        #[cfg(not(target_arch = "wasm32"))]
-        let timer = std::time::Instant::now();
-        let player = &self.players[p_idx];
-        let card = player.hand[hand_idx];
-        let orig = self.find_orig_index(p_idx, card);
-        // compute a hash key for caching
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        p_idx.hash(&mut hasher);
-        orig.hash(&mut hasher);
-        for p in &self.played {
-            p.hash(&mut hasher);
-        }
-        let key = hasher.finish();
-        if let Some(rate) = self.rate_cache.borrow().get(&key) {
-            return *rate;
-        }
-
-        let mut lists: [Vec<usize>; 4] = std::array::from_fn(|_| Vec::new());
-        for i in 0..4 {
-            let mut prefix = self.played[i].clone();
-            if i == p_idx {
-                prefix.push(orig);
-            }
-            let (s, e) = perm_prefix_range(&prefix);
-            if let Some(ref allowed_indices) = self.perm_range {
-                lists[i] = allowed_indices
-                    .iter()
-                    .cloned()
-                    .filter(|&v| v >= s && v < e)
-                    .collect();
-            } else {
-                lists[i] = (s..e).collect();
-            }
-        }
-        let counts = self
-            .db
-            .counts_in_lists(&lists[0], &lists[1], &lists[2], &lists[3]);
-        let team = p_idx % 2;
-        let wins = counts[if team == 0 {
-            GameResult::Team1Win as usize
-        } else {
-            GameResult::Team2Win as usize
-        }];
-        let losses = counts[if team == 0 {
-            GameResult::Team2Win as usize
-        } else {
-            GameResult::Team1Win as usize
-        }];
-        let total = wins + losses;
-        let rate = if total == 0 {
-            0.0
-        } else {
-            wins as f64 / total as f64
-        };
-        self.rate_cache.borrow_mut().insert(key, rate);
-        #[cfg(not(target_arch = "wasm32"))]
-        println!(
-            "card_win_rate for player {} hand {} took {:?}",
-            p_idx,
-            hand_idx,
-            timer.elapsed()
-        );
-        rate
+    /// Backwards-compatible best-card pick assuming the player is leading and
+    /// no team tricks have been won. Prefer [`Self::best_card_index_with_trick`]
+    /// when trick state is known.
+    pub fn best_card_index(&self, p_idx: usize, allowed: &[usize]) -> usize {
+        self.best_card_index_with_trick(p_idx, allowed, &[], [0, 0])
     }
 
-    fn win_rates_for_player(&self, p_idx: usize) -> Vec<f64> {
-        (0..self.players[p_idx].hand.len())
-            .map(|i| self.card_win_rate(p_idx, i))
-            .collect()
+    fn win_rates_for_player_with_trick(
+        &self,
+        p_idx: usize,
+        current_trick: &[(usize, Card)],
+        tricks_won: [usize; 2],
+    ) -> Vec<f64> {
+        let allowed: Vec<usize> = (0..self.players[p_idx].hand.len()).collect();
+        let evals = self.evaluate_moves(p_idx, &allowed, current_trick, tricks_won);
+        let mut rates = vec![0.0; self.players[p_idx].hand.len()];
+        for e in evals {
+            rates[e.hand_idx] = e.rate();
+        }
+        rates
     }
 
     pub fn trump_suit(&self) -> Option<Suit> {
@@ -544,9 +466,35 @@ impl GameState {
         Ok(())
     }
 
+    /// Concede the current round on behalf of `team`: the opposing team
+    /// receives the current `round_points` and the round ends. Caller must
+    /// then [`Self::start_round`] (or [`Self::start_round_interactive`]) for
+    /// the next deal. Returns `GameResult` describing the awarded round.
+    pub fn concede_round(&mut self, team: usize) -> Result<GameResult, &'static str> {
+        if team > 1 {
+            return Err("invalid team");
+        }
+        let winner_team = 1 - team;
+        self.scores[winner_team] += self.round_points;
+        self.playing_round = false;
+        self.dealer = (self.dealer + 1) % 4;
+        Ok(if winner_team == 0 {
+            GameResult::Team1Win
+        } else {
+            GameResult::Team2Win
+        })
+    }
+
     #[allow(unused_assignments)]
     pub fn play_round(&mut self) -> GameResult {
         self.start_round();
+        if self.verbose {
+            if let Some(rechte) = self.rechte {
+                println!("Trump suit is {}", rechte.suit);
+                println!("Striker rank is {}", rechte.rank);
+                println!("Rechte is {}", rechte);
+            }
+        }
         let mut tricks = [0usize; 2];
         let mut lead = (self.dealer + 1) % 4;
         for _ in 0..TRICKS_PER_ROUND {
@@ -554,15 +502,17 @@ impl GameState {
             let lead_card = {
                 let allowed: Vec<usize> = (0..self.players[lead].hand.len()).collect();
                 let card = if self.players[lead].human {
-                    let rates = self.win_rates_for_player(lead);
+                    let rates = self.win_rates_for_player_with_trick(lead, &played, tricks);
                     self.players[lead].play_card(&allowed, Some(&rates))
                 } else {
-                    let idx = self.best_card_index(lead, &allowed);
+                    let idx = self.best_card_index_with_trick(lead, &allowed, &played, tricks);
                     self.players[lead].hand.remove(idx)
                 };
                 let orig = self.find_orig_index(lead, card);
                 self.played[lead].push(orig);
-                println!("Player {} plays {}", lead + 1, card);
+                if self.verbose {
+                    println!("Player {} plays {}", lead + 1, card);
+                }
                 played.push((lead, card));
                 card
             };
@@ -571,15 +521,17 @@ impl GameState {
                 let p_idx = (lead + offset) % 4;
                 let allowed = self.allowed_indices(p_idx, lead_card);
                 let card = if self.players[p_idx].human {
-                    let rates = self.win_rates_for_player(p_idx);
+                    let rates = self.win_rates_for_player_with_trick(p_idx, &played, tricks);
                     self.players[p_idx].play_card(&allowed, Some(&rates))
                 } else {
-                    let idx = self.best_card_index(p_idx, &allowed);
+                    let idx = self.best_card_index_with_trick(p_idx, &allowed, &played, tricks);
                     self.players[p_idx].hand.remove(idx)
                 };
                 let orig = self.find_orig_index(p_idx, card);
                 self.played[p_idx].push(orig);
-                println!("Player {} plays {}", p_idx + 1, card);
+                if self.verbose {
+                    println!("Player {} plays {}", p_idx + 1, card);
+                }
                 played.push((p_idx, card));
             }
             let rechte = self.rechte.unwrap();
@@ -593,7 +545,9 @@ impl GameState {
                 }
             }
             let (winner_idx, _, _) = best;
-            println!("Player {} wins the trick\n", winner_idx + 1);
+            if self.verbose {
+                println!("Player {} wins the trick\n", winner_idx + 1);
+            }
             tricks[winner_idx % 2] += 1;
             lead = winner_idx;
         }
@@ -623,10 +577,11 @@ impl GameState {
             let lead_hand = self.players[lead].hand.clone();
             let lead_card = {
                 let card = if self.players[lead].human {
-                    let rates = self.win_rates_for_player(lead);
+                    let rates = self.win_rates_for_player_with_trick(lead, &played, tricks);
                     self.players[lead].play_card(&lead_allowed, Some(&rates))
                 } else {
-                    let idx = self.best_card_index(lead, &lead_allowed);
+                    let idx =
+                        self.best_card_index_with_trick(lead, &lead_allowed, &played, tricks);
                     self.players[lead].hand.remove(idx)
                 };
                 let orig = self.find_orig_index(lead, card);
@@ -646,10 +601,11 @@ impl GameState {
                 let allowed = self.allowed_indices(p_idx, lead_card);
                 let hand_before = self.players[p_idx].hand.clone();
                 let card = if self.players[p_idx].human {
-                    let rates = self.win_rates_for_player(p_idx);
+                    let rates = self.win_rates_for_player_with_trick(p_idx, &played, tricks);
                     self.players[p_idx].play_card(&allowed, Some(&rates))
                 } else {
-                    let idx = self.best_card_index(p_idx, &allowed);
+                    let idx =
+                        self.best_card_index_with_trick(p_idx, &allowed, &played, tricks);
                     self.players[p_idx].hand.remove(idx)
                 };
                 let orig = self.find_orig_index(p_idx, card);
@@ -728,7 +684,7 @@ impl GameState {
         }
     }
 
-    fn finish_trick(&mut self, record: &mut Vec<RoundStep>) {
+    fn finish_trick(&mut self, _record: &mut Vec<RoundStep>) {
         let rechte = self.rechte.unwrap();
         let lead_suit = self.current_trick[0].1.suit;
         let mut best = (self.current_trick[0].0, self.current_trick[0].1, 0usize);
@@ -772,7 +728,9 @@ impl GameState {
                 return None;
             }
             let allowed = self.current_allowed();
-            let idx = self.best_card_index(p, &allowed);
+            let trick = self.current_trick.clone();
+            let tricks_won = self.tricks_won;
+            let idx = self.best_card_index_with_trick(p, &allowed, &trick, tricks_won);
             self.play_internal(p, idx, record);
             if !self.playing_round {
                 return Some(if self.tricks_won[0] > self.tricks_won[1] {
@@ -797,6 +755,14 @@ impl GameState {
 
     pub fn human_allowed_indices(&self) -> Vec<usize> {
         self.current_allowed()
+    }
+
+    /// Move evaluations (wins/total per legal card) for the player whose turn
+    /// it is. Returned in current-hand-index order, restricted to legal cards.
+    pub fn human_move_evaluations(&self) -> Vec<MoveEvaluation> {
+        let p = self.current_player();
+        let allowed = self.current_allowed();
+        self.evaluate_moves(p, &allowed, &self.current_trick, self.tricks_won)
     }
 
     pub fn human_play(&mut self, idx: usize) -> (Option<GameResult>, Vec<RoundStep>) {
@@ -824,6 +790,7 @@ impl GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::all_hand_orders;
 
     #[test]
     fn striker_beats_trump() {
@@ -865,6 +832,18 @@ mod tests {
         let g = GameState::new(0);
         assert_eq!(g.scores, [0, 0]);
         assert_eq!(g.round_points, ROUND_POINTS);
+    }
+
+    #[test]
+    fn concede_round_awards_round_points_to_other_team() {
+        let mut g = GameState::new(0);
+        assert!(g.raise_round(0).is_ok());
+        assert!(g.raise_round(1).is_ok());
+        assert_eq!(g.round_points, ROUND_POINTS + 2);
+        let result = g.concede_round(0).unwrap();
+        assert_eq!(result, GameResult::Team2Win);
+        assert_eq!(g.scores, [0, ROUND_POINTS + 2]);
+        assert_eq!(g.dealer, 1);
     }
 
     #[test]
@@ -959,7 +938,7 @@ mod tests {
 
     #[test]
     fn play_hand_by_ids_matches_simulation() {
-        let mut deck = deck();
+        let deck = deck();
         let mut hands = [[DUMMY_CARD; TRICKS_PER_ROUND]; 4];
         for i in 0..TRICKS_PER_ROUND {
             for j in 0..4 {
@@ -995,182 +974,145 @@ mod tests {
     }
 
     #[test]
-    fn start_round_populates_database() {
+    fn database_evaluator_produces_non_empty_counts_after_start_round() {
+        // Restrict the perm_range so populating doesn't take forever in tests.
         let mut g = GameState::new(0);
-        g.perm_range = Some(vec![0]);
+        g.set_evaluator(Evaluator::Database);
+        g.set_perm_range_single(0);
+        // Re-apply evaluator so the new perm_range is observed.
+        g.set_evaluator(Evaluator::Database);
         g.start_round();
-        // database should contain at least the entry for all-zero permutations
-        assert!(g.db.get(0, 0, 0, 0) != GameResult::NotPlayed);
+        // After populate, every legal candidate move should have total > 0.
+        let p = (g.dealer + 1) % 4;
+        let allowed: Vec<usize> = (0..g.players[p].hand.len()).collect();
+        let evs = g.evaluate_moves(p, &allowed, &[], [0, 0]);
+        assert!(!evs.is_empty());
+        assert!(evs.iter().any(|e| e.total > 0));
     }
 
     #[test]
-    fn best_card_uses_database() {
+    fn custom_evaluator_is_consulted_via_set_evaluator_impl() {
+        use crate::evaluator::{EvaluationContext, MoveEvaluator};
         use std::cell::RefCell;
         use std::rc::Rc;
 
-        struct DummyDB {
+        struct RecordingEval {
             calls: Rc<RefCell<u32>>,
         }
-
-        impl GameDatabase for DummyDB {
-            fn set(&mut self, _p1: usize, _p2: usize, _p3: usize, _p4: usize, _r: GameResult) {}
-            fn get(&self, _p1: usize, _p2: usize, _p3: usize, _p4: usize) -> GameResult {
-                GameResult::NotPlayed
+        impl MoveEvaluator for RecordingEval {
+            fn prepare_round(
+                &mut self,
+                _hands: &[[Card; TRICKS_PER_ROUND]; 4],
+                _dealer: usize,
+                _rechte: Card,
+            ) {
             }
-            fn counts_in_ranges(
-                &self,
-                _p1: std::ops::Range<usize>,
-                _p2: std::ops::Range<usize>,
-                _p3: std::ops::Range<usize>,
-                _p4: std::ops::Range<usize>,
-            ) -> [u32; 4] {
-                let mut c = self.calls.borrow_mut();
-                let result = if *c == 0 {
-                    [0, 10, 0, 0]
-                } else {
-                    [0, 0, 10, 0]
-                };
-                *c += 1;
-                result
+            fn evaluate_moves(&self, ctx: &EvaluationContext<'_>) -> Vec<MoveEvaluation> {
+                *self.calls.borrow_mut() += 1;
+                ctx.allowed_orig_indices
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _orig)| MoveEvaluation {
+                        hand_idx: i,
+                        // First card looks like a winner; rest losers.
+                        wins: if i == 0 { 10 } else { 0 },
+                        total: 10,
+                    })
+                    .collect()
             }
-
-            fn counts_in_lists(
-                &self,
-                _p1: &[usize],
-                _p2: &[usize],
-                _p3: &[usize],
-                _p4: &[usize],
-            ) -> [u32; 4] {
-                self.counts_in_ranges(0..0, 0..0, 0..0, 0..0)
+            fn name(&self) -> &'static str {
+                "recording"
             }
         }
 
         let counter = Rc::new(RefCell::new(0));
         let mut g = GameState::new(0);
-        g.db = Box::new(DummyDB {
-            calls: counter.clone(),
-        });
-
+        g.rechte = Some(Card::new(Suit::Hearts, Rank::Unter));
         g.players[0].hand = vec![
             Card::new(Suit::Hearts, Rank::Seven),
             Card::new(Suit::Bells, Rank::Ace),
         ];
         g.orig_hands[0][0] = g.players[0].hand[0];
         g.orig_hands[0][1] = g.players[0].hand[1];
+        g.set_evaluator_impl(Box::new(RecordingEval {
+            calls: counter.clone(),
+        }));
 
         let idx = g.best_card_index(0, &[0, 1]);
         assert_eq!(idx, 0);
-        assert!(*counter.borrow() >= 2);
+        assert!(*counter.borrow() >= 1);
     }
 
     #[test]
-    fn card_win_rate_uses_database() {
-        use std::cell::RefCell;
-        use std::rc::Rc;
+    fn search_memo_reused_across_candidates() {
+        use crate::search::{count_completions, SearchMemo, SearchPosition};
 
-        struct DummyDB {
-            calls: Rc<RefCell<u32>>,
-        }
-
-        impl GameDatabase for DummyDB {
-            fn set(&mut self, _p1: usize, _p2: usize, _p3: usize, _p4: usize, _r: GameResult) {}
-            fn get(&self, _p1: usize, _p2: usize, _p3: usize, _p4: usize) -> GameResult {
-                GameResult::NotPlayed
-            }
-            fn counts_in_ranges(
-                &self,
-                _p1: std::ops::Range<usize>,
-                _p2: std::ops::Range<usize>,
-                _p3: std::ops::Range<usize>,
-                _p4: std::ops::Range<usize>,
-            ) -> [u32; 4] {
-                *self.calls.borrow_mut() += 1;
-                [0, 5, 10, 0]
-            }
-
-            fn counts_in_lists(
-                &self,
-                _p1: &[usize],
-                _p2: &[usize],
-                _p3: &[usize],
-                _p4: &[usize],
-            ) -> [u32; 4] {
-                self.counts_in_ranges(0..0, 0..0, 0..0, 0..0)
-            }
-        }
-
-        let counter = Rc::new(RefCell::new(0));
         let mut g = GameState::new(0);
-        g.db = Box::new(DummyDB {
-            calls: counter.clone(),
-        });
-
-        g.players[0].hand = vec![Card::new(Suit::Hearts, Rank::Seven)];
-        g.orig_hands[0][0] = g.players[0].hand[0];
-
-        let rate = g.card_win_rate(0, 0);
-        assert!(*counter.borrow() > 0);
-        assert!((rate - 0.3333).abs() < 1e-4);
-    }
-
-    #[test]
-    fn cached_card_win_rate_is_faster() {
-        use std::cell::RefCell;
-        use std::rc::Rc;
-
-        struct SlowDB {
-            calls: Rc<RefCell<u32>>,
+        g.dealer = 0;
+        g.rechte = Some(Card::new(Suit::Hearts, Rank::Unter));
+        g.orig_hands = [
+            [
+                Card::new(Suit::Hearts, Rank::Unter),
+                Card::new(Suit::Bells, Rank::Ace),
+                Card::new(Suit::Leaves, Rank::King),
+                Card::new(Suit::Hearts, Rank::Ace),
+                Card::new(Suit::Acorns, Rank::Ten),
+            ],
+            [
+                Card::new(Suit::Hearts, Rank::Ten),
+                Card::new(Suit::Bells, Rank::King),
+                Card::new(Suit::Leaves, Rank::Ace),
+                Card::new(Suit::Bells, Rank::Seven),
+                Card::new(Suit::Acorns, Rank::Nine),
+            ],
+            [
+                Card::new(Suit::Hearts, Rank::King),
+                Card::new(Suit::Leaves, Rank::Ober),
+                Card::new(Suit::Bells, Rank::Nine),
+                Card::new(Suit::Hearts, Rank::Nine),
+                Card::new(Suit::Acorns, Rank::Unter),
+            ],
+            [
+                Card::new(Suit::Hearts, Rank::Ober),
+                Card::new(Suit::Bells, Rank::Unter),
+                Card::new(Suit::Leaves, Rank::Nine),
+                Card::new(Suit::Acorns, Rank::Ace),
+                Card::new(Suit::Bells, Rank::Ten),
+            ],
+        ];
+        for p in 0..4 {
+            g.players[p].hand = g.orig_hands[p].to_vec();
         }
 
-        impl GameDatabase for SlowDB {
-            fn set(&mut self, _p1: usize, _p2: usize, _p3: usize, _p4: usize, _r: GameResult) {}
-            fn get(&self, _p1: usize, _p2: usize, _p3: usize, _p4: usize) -> GameResult {
-                GameResult::NotPlayed
-            }
-            fn counts_in_ranges(
-                &self,
-                _p1: std::ops::Range<usize>,
-                _p2: std::ops::Range<usize>,
-                _p3: std::ops::Range<usize>,
-                _p4: std::ops::Range<usize>,
-            ) -> [u32; 4] {
-                std::thread::sleep(std::time::Duration::from_millis(20));
-                *self.calls.borrow_mut() += 1;
-                [0, 5, 10, 0]
-            }
+        // First evaluation primes the memo, second should be much faster.
+        let allowed: Vec<usize> = (0..5).collect();
+        let t0 = std::time::Instant::now();
+        let _e1 = g.evaluate_moves(1, &allowed, &[], [0, 0]);
+        let first = t0.elapsed();
+        let t1 = std::time::Instant::now();
+        let _e2 = g.evaluate_moves(1, &allowed, &[], [0, 0]);
+        let second = t1.elapsed();
+        // Confidence: cached path should be at least 2x faster.
+        assert!(
+            second * 2 <= first || first.as_micros() < 200,
+            "second={:?} first={:?}",
+            second,
+            first
+        );
 
-            fn counts_in_lists(
-                &self,
-                _p1: &[usize],
-                _p2: &[usize],
-                _p3: &[usize],
-                _p4: &[usize],
-            ) -> [u32; 4] {
-                self.counts_in_ranges(0..0, 0..0, 0..0, 0..0)
-            }
-        }
-
-        let counter = Rc::new(RefCell::new(0));
-        let mut g = GameState::new(0);
-        g.db = Box::new(SlowDB {
-            calls: counter.clone(),
-        });
-
-        g.players[0].hand = vec![Card::new(Suit::Hearts, Rank::Seven)];
-        g.orig_hands[0][0] = g.players[0].hand[0];
-
-        let start1 = std::time::Instant::now();
-        let _ = g.card_win_rate(0, 0);
-        let dur1 = start1.elapsed();
-        let calls_after_first = *counter.borrow();
-
-        let start2 = std::time::Instant::now();
-        let _ = g.card_win_rate(0, 0);
-        let dur2 = start2.elapsed();
-        let calls_after_second = *counter.borrow();
-
-        assert!(calls_after_first > 0);
-        assert_eq!(calls_after_first, calls_after_second);
-        assert!(dur2 < dur1);
+        // Also verify that count_completions populates a fresh memo with
+        // sub-millisecond cost when called twice on the same position.
+        let pos = SearchPosition {
+            orig_hands: &g.orig_hands,
+            remaining: [0b11111; 4],
+            lead: 1,
+            dealer: 0,
+            rechte: g.rechte.unwrap(),
+        };
+        let mut memo = SearchMemo::new();
+        let _ = count_completions(&pos, &mut memo);
+        let t2 = std::time::Instant::now();
+        let _ = count_completions(&pos, &mut memo);
+        assert!(t2.elapsed().as_millis() <= 5);
     }
 }

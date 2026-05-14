@@ -1,6 +1,11 @@
 {
   "private": true,
   "scripts": {
-    "start": "npm --prefix frontend install && npm --prefix frontend run build:wasm && npm --prefix frontend exec vite"
+    "start": "npm --prefix frontend install && npm --prefix frontend run build:wasm && npm --prefix frontend exec vite",
+    "test": "cargo test && npm --prefix frontend test",
+    "test:e2e": "npm --prefix frontend run test:e2e",
+    "coverage:rust": "cargo llvm-cov --html --output-dir coverage-rust && cargo llvm-cov --lcov --output-path coverage-rust/lcov.info",
+    "coverage:js": "npm --prefix frontend run coverage",
+    "coverage": "npm run coverage:rust && npm run coverage:js"
   }
 }

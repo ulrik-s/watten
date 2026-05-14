@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen as swb;
 use wasm_bindgen::prelude::*;
 
-use crate::game::{GameState, RoundStep};
-use crate::{Card, GameResult, Rank, Suit};
+use crate::game::{Evaluator, GameState};
+use crate::{Rank, Suit};
 
 #[wasm_bindgen]
 pub struct WasmGame {
@@ -82,6 +82,26 @@ impl WasmGame {
         self.inner.play_round() as u8
     }
 
+    /// Raise the current round's value by one point. team = 0 (Team 1) or
+    /// 1 (Team 2). Returns true on success, false if the raise is illegal.
+    pub fn raise_round(&mut self, team: usize) -> bool {
+        self.inner.raise_round(team).is_ok()
+    }
+
+    /// Concede the current round on behalf of `team`. Returns true on success.
+    pub fn concede_round(&mut self, team: usize) -> bool {
+        self.inner.concede_round(team).is_ok()
+    }
+
+    pub fn round_points(&self) -> usize {
+        self.inner.round_points
+    }
+
+    /// Target score to win the game.
+    pub fn winning_points(&self) -> usize {
+        crate::game::WINNING_POINTS
+    }
+
     pub fn trump_suit(&self) -> Option<String> {
         self.inner.trump_suit().map(|s| s.to_string())
     }
@@ -156,6 +176,46 @@ impl WasmGame {
 
     pub fn human_allowed_indices(&self) -> JsValue {
         swb::to_value(&self.inner.human_allowed_indices()).unwrap()
+    }
+
+    /// Returns `[{hand_idx, wins, total, rate}]` for the player whose turn it
+    /// is right now, restricted to legal moves.
+    pub fn human_move_evaluations(&self) -> JsValue {
+        #[derive(Serialize)]
+        struct JsEval {
+            hand_idx: usize,
+            wins: u32,
+            total: u32,
+            rate: f64,
+        }
+        let evals: Vec<JsEval> = self
+            .inner
+            .human_move_evaluations()
+            .into_iter()
+            .map(|e| JsEval {
+                hand_idx: e.hand_idx,
+                wins: e.wins,
+                total: e.total,
+                rate: e.rate(),
+            })
+            .collect();
+        swb::to_value(&evals).unwrap()
+    }
+
+    /// `"search"` (default, fast) or `"database"` (legacy brute-force 120^4).
+    pub fn set_evaluator(&mut self, name: &str) {
+        let kind = match name {
+            "database" | "db" => Evaluator::Database,
+            _ => Evaluator::Search,
+        };
+        self.inner.set_evaluator(kind);
+    }
+
+    pub fn evaluator(&self) -> String {
+        match self.inner.evaluator() {
+            Evaluator::Search => "search".into(),
+            Evaluator::Database => "database".into(),
+        }
     }
 
     pub fn human_play(&mut self, idx: usize) -> JsValue {

@@ -1,83 +1,156 @@
 # Watten
 
-Basic structures for a Watten card game trainer written in Rust.
+A Watten card-game trainer (Tyrolean / 33-card variant) written in Rust with a
+WebAssembly frontend. The bots use a memoized legal-completion search to pick
+their cards and to estimate per-card win rates for the human player.
 
-The crate provides:
+## Crate features
 
-- A 33 card deck used in the game
-- Utilities for enumerating all 120 possible orders in which a 5‑card hand can be played
-- A database API that maps ordered plays of four players to a result (team 1/2 win, not played or rule violation)
-- `GameState::play_round` returns the [`GameResult`] of the round
-- `GameState::raise_round` lets teams increase the current round value
-- `play_hand` plays a round with specific hand IDs and returns the result
-- Functions for computing permutation ranges so partially played games can be matched
+- 33-card Watten deck (four suits × Seven..Ace plus the Weli)
+- `Card`, `Suit`, `Rank`, `GameResult`, `Player`, `GameState`
+- `card_strength` enforcing Rechte > Striker rank > trump > lead > rest
+- Seeing-player must-follow-trump rule (`GameState::allowed_indices`)
+- `GameState::play_round` / `play_round_logged` (non-interactive)
+- `start_round_interactive` + `human_play` + `advance_bots` (interactive)
+- `raise_round(team)` / `concede_round(team)` for "raising" and "geh"
+- Two move evaluators selectable via `set_evaluator`:
+  - `Evaluator::Search` (default): memoized enumeration of all legal trick
+    completions from the current state. Sub-second per round.
+  - `Evaluator::Database`: legacy 120⁴ brute-force, kept as a benchmark
+    fallback. `cargo full` exercises it.
 
-Run tests with `cargo test`. Heavier tests that populate the full
-database are ignored by default and can be run with `cargo full`.
-The frontend also has a small test suite which can be executed with
-`npm test` from the `frontend` directory.
+## Running
 
-## WebAssembly Frontend
+### Quick start (play locally)
 
-The crate can be compiled to WebAssembly and consumed by a small React
-application.  You will need the [`wasm-pack`](https://rustwasm.github.io/wasm-pack/)
-tool and a recent Node.js installation.
+You need:
 
-### Building and running
+- Rust (stable) + the `wasm32-unknown-unknown` target
+  (`rustup target add wasm32-unknown-unknown`)
+- [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) (`cargo install wasm-pack`)
+- Node.js 18+
 
-You can build the WebAssembly package, install JavaScript dependencies and
-start the development server with a single command from the repository root.
-The command runs `wasm-pack build` under the hood to compile the Rust code:
+Then, from the repository root:
+
+```bash
+make dev
+```
+
+Open <http://localhost:5173> in your browser. The Vite dev server hot-reloads
+both the React frontend and the Rust → WASM bundle.
+
+Equivalent without `make`:
 
 ```bash
 npm start
 ```
 
-Open `http://localhost:5173` in your browser.
+### Tests
 
-If you prefer to run the steps manually:
+```bash
+cargo test           # fast Rust unit + integration tests
+cargo full           # also runs the heavy database population tests
+```
 
-1. Compile the Rust code to WebAssembly from the repository root:
+Frontend unit / integration tests (Vitest + Testing Library, builds wasm
+first):
 
-   ```bash
-   npm --prefix frontend run build:wasm
-   ```
+```bash
+cd frontend
+npm install
+npm test             # Vitest
+npm run test:watch   # Vitest in watch mode
+```
 
-   This invokes `wasm-pack build --target web` and outputs a `pkg/` directory.
+End-to-end browser tests (Playwright on Chromium, Firefox and WebKit):
 
-2. Install JavaScript dependencies and start the development server:
+```bash
+cd frontend
+npx playwright install   # first time only
+npm run test:e2e
+```
 
-   ```bash
-   cd frontend
-   npm install
-   npm start
-   ```
+### Code coverage
 
-3. To create a production build run:
+From the repository root:
 
-   ```bash
-   npm run build
-   ```
+```bash
+npm run coverage         # Rust (cargo-llvm-cov) + JS (Vitest v8)
+npm run coverage:rust    # Rust only — HTML in coverage-rust/html
+npm run coverage:js      # JS only   — HTML in frontend/coverage
+```
 
-   You can then open `dist/index.html` directly or run `npm run serve` to preview
-   it.
+`cargo llvm-cov` requires the `llvm-tools-preview` rustup component and the
+`cargo-llvm-cov` cargo subcommand:
 
-4. To run the frontend tests:
+```bash
+rustup component add llvm-tools-preview
+cargo install cargo-llvm-cov
+```
 
-   ```bash
-   npm test
-   ```
+### Deployment
 
-   This builds the WebAssembly with `wasm-pack` and runs a small Node.js
-   script that loads the module and verifies it can start a round.
+Pushes to `main` trigger
+[`.github/workflows/gh-pages.yml`](.github/workflows/gh-pages.yml), which
+builds the Vite bundle with `VITE_BASE` set to the repo path and deploys it
+to GitHub Pages. Enable Pages in repository settings → *Pages* → *Source:
+GitHub Actions* once, and subsequent pushes deploy automatically. The
+deployed URL is reported in each workflow run.
 
-5. To run the heavy database tests together with the frontend tests:
+### CLI
 
-   ```bash
-   npm run full-test
-   ```
+```bash
+cargo run
+```
 
-   This invokes `cargo full` to execute the ignored Rust tests that populate
-   the full database and then runs the TypeScript tests.
+Plays a game in the terminal. Set `verbose = true` on `GameState` to see
+narration (already enabled by the CLI binary).
 
-`yarn` or `pnpm` can be used instead of `npm` if preferred.
+### WebAssembly frontend
+
+You will need [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) and
+Node.js. From the repository root:
+
+```bash
+npm start
+```
+
+This installs JS dependencies, runs `wasm-pack build --target web`, and starts
+Vite. Open `http://localhost:5173`. The UI shows your hand with a per-card
+win-rate estimate (wins / total over all legal completions); opponent hand
+sizes; the current trick; the running scores; and **Raise (+1)** and **Concede
+round** buttons.
+
+To build a production bundle and preview it:
+
+```bash
+cd frontend
+npm run build
+npm run serve
+```
+
+To run the Playwright UI tests (Firefox only):
+
+```bash
+cd frontend
+npm run test:ui
+```
+
+## Rules summary
+
+- **Trump (Schlag)** is the suit of the *top card of the dealer's pile* (the
+  first card dealt to the dealer).
+- **Striker rank (Weisen)** is the rank of the *top card of the forehand's
+  pile* (the first card dealt to the player after the dealer).
+- Card strength: Rechte (the trump-suit + striker-rank card) > Weli > any
+  Striker > any trump > lead suit > rest. First-played wins ties between
+  equal-strength cards (`card_strength` in [src/game.rs](src/game.rs)).
+- Seeing players (dealer + forehand) must play a trump or striker when trump
+  is led if they have one (enforced by `GameState::allowed_indices`).
+
+## Status / known limitations
+
+- The Critical cards (Maxi/Belli/Spitz) of Bavarian Watten are not modelled —
+  this is the Tyrolean/generic 33-card variant.
+- Winning score defaults to 15 (`game::WINNING_POINTS`). Not yet runtime-
+  configurable from the UI.

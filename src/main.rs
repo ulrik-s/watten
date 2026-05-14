@@ -13,6 +13,7 @@ fn main() {
     };
 
     let mut game = GameState::new(humans);
+    game.verbose = true;
     while game.scores[0] < WINNING_POINTS && game.scores[1] < WINNING_POINTS {
         println!("\nStarting round. Dealer is player {}\n", game.dealer + 1);
         let result = game.play_round();
