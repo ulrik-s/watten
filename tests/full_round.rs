@@ -107,12 +107,7 @@ fn full_round_five_tricks_winners() {
         ],
     ];
     let (winners, _tricks) = manual_round(&mut hands, 0, rechte);
-    // Under the round_score + trick_score model: in trick 4 the lead is
-    // Bells Seven (P1). P2 plays Hearts Nine (round 100, trick 0) and P0
-    // plays Hearts Ace (round 100, trick 0); they tie at 100 and the
-    // earlier play (P2, position 1) wins. The old test assumed trump
-    // rank broke the tie — under the user's new spec it does not.
-    assert_eq!(winners, vec![0, 3, 1, 2, 2]);
+    assert_eq!(winners, vec![0, 3, 1, 0, 2]);
 }
 
 #[test]

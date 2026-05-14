@@ -260,25 +260,35 @@ test.describe('widgets', () => {
     // Guard: make sure we captured a full trick.
     expect(trickCards.filter((c) => c.rank !== '' && c.suit !== '').length).toBe(4);
 
-    // Independently compute the expected winner using the rules the user
-    // described.
+    // Independently compute the expected winner using the user's spec:
+    //   round_score = (trump_suit ? 100 : 0) + (striker_rank ? 200 : 0)
+    //   trick_score = -400 if striker_rank AND earlier striker played
+    //                 rv + 20 if same suit as lead
+    //                 rv      otherwise
+    // Strict > with earlier-wins-ties.
     const RANK_DISPLAY_TO_VALUE: Record<string, number> = {
       '7': 1, '8': 2, '9': 3, '10': 4,
       Unter: 5, Ober: 6, King: 7, Ace: 8, Weli: 9,
     };
     const leadSuit = trickCards[0].suit;
-    function score(c: { rank: string; suit: string }, pos: number): number {
-      if (c.suit === trumpSuit && c.rank === strikerDisplay) return 200 * 10 - pos; // rechte
-      if (c.rank === 'Weli') return 180 * 10 - pos;
-      if (c.rank === strikerDisplay) return 190 * 10 - pos;
-      if (c.suit === trumpSuit) return (100 + (RANK_DISPLAY_TO_VALUE[c.rank] ?? 0)) * 10 - pos;
-      if (c.suit === leadSuit) return (50 + (RANK_DISPLAY_TO_VALUE[c.rank] ?? 0)) * 10 - pos;
-      return (RANK_DISPLAY_TO_VALUE[c.rank] ?? 0) * 10 - pos;
+    function score(c: { rank: string; suit: string }, pos: number, all: typeof trickCards): number {
+      let round = 0;
+      if (c.suit === trumpSuit) round += 100;
+      if (c.rank === strikerDisplay) round += 200;
+      let trick: number;
+      if (c.rank === strikerDisplay) {
+        let earlierStriker = false;
+        for (let k = 0; k < pos; k++) if (all[k].rank === strikerDisplay) earlierStriker = true;
+        if (earlierStriker) return round - 400;
+      }
+      const rv = RANK_DISPLAY_TO_VALUE[c.rank] ?? 0;
+      trick = c.suit === leadSuit ? rv + 20 : rv;
+      return round + trick;
     }
     let expectedWinner = 0;
-    let bestScore = score(trickCards[0], 0);
+    let bestScore = score(trickCards[0], 0, trickCards);
     for (let i = 1; i < 4; i++) {
-      const s = score(trickCards[i], i);
+      const s = score(trickCards[i], i, trickCards);
       if (s > bestScore) {
         bestScore = s;
         expectedWinner = i;

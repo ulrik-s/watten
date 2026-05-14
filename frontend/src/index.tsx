@@ -96,8 +96,8 @@ function trickScore(
     }
   }
   const leadSuit = trick[0].card.suit;
-  if (card.suit === leadSuit) return RANK_VALUES[card.rank] ?? 0;
-  return 0;
+  const rv = RANK_VALUES[card.rank] ?? 0;
+  return card.suit === leadSuit ? rv + 20 : rv;
 }
 
 function cardTotalScore(

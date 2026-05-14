@@ -103,8 +103,9 @@ pub fn round_score(card: &Card, rechte: Card) -> i16 {
 ///     also had striker rank, the trick score is **-400** (overrides
 ///     everything else).
 ///   - Else if the card's suit matches the *lead* card's suit, the trick
-///     score is the card's rank value (1..9).
-///   - Else the trick score is 0.
+///     score is `rank_value + 20`.
+///   - Else the trick score is `rank_value` (i.e. cards still rank
+///     against each other within their suit even when off-lead).
 pub fn trick_score(card: &Card, position: usize, trick: &[Card], rechte: Card) -> i16 {
     if card.rank == rechte.rank {
         for earlier in 0..position {
@@ -114,10 +115,11 @@ pub fn trick_score(card: &Card, position: usize, trick: &[Card], rechte: Card) -
         }
     }
     let lead_suit = trick[0].suit;
+    let rv = rank_value(card.rank) as i16;
     if card.suit == lead_suit {
-        rank_value(card.rank) as i16
+        rv + 20
     } else {
-        0
+        rv
     }
 }
 
@@ -1051,6 +1053,20 @@ mod tests {
             Card::new(Suit::Bells, Rank::Unter),  // 1: striker 200 + 0 = 200
         ];
         assert_eq!(trick_winner_position(&trick, rechte), 1);
+    }
+
+    #[test]
+    fn higher_trump_off_lead_still_beats_lower_trump_off_lead() {
+        // Lead is a pure card; two trumps (off-lead-suit) follow. With
+        // trick_score off-suit = rank_value (no +20), trump rank still
+        // breaks ties: the higher trump wins.
+        let rechte = Card::new(Suit::Hearts, Rank::Unter);
+        let trick = vec![
+            Card::new(Suit::Bells, Rank::Seven), // 0: lead pure  21
+            Card::new(Suit::Hearts, Rank::Nine), // 1: trump      103
+            Card::new(Suit::Hearts, Rank::Ace),  // 2: trump      108
+        ];
+        assert_eq!(trick_winner_position(&trick, rechte), 2);
     }
 
     #[test]
