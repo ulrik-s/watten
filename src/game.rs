@@ -4,22 +4,25 @@ use crate::{deck, shuffle, Card, GameResult, Rank, Suit};
 use num_cpus;
 use serde::Serialize;
 
+// Re-export the rules-layer items under `game::` so the existing
+// `use crate::game::{...}` lines (in this crate, tests, and the WASM
+// bindings) keep working after the extraction.
+pub use crate::rules::{
+    card_score, rank_value, round_score, trick_score, trick_winner_position, RAISE_LOCKOUT_SCORE,
+    ROUND_POINTS, TRICKS_PER_ROUND, WINNING_POINTS,
+};
+
 /// Selector for the bundled evaluator strategies. For custom evaluators,
 /// call [`GameState::set_evaluator_impl`] with your own
 /// `Box<dyn MoveEvaluator>` instead.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Evaluator {
     /// Memoized legal-completion search. Fast, default.
+    #[default]
     Search,
     /// Brute-force 120^4 database population. Kept as a benchmarking
     /// fallback and for cross-validation against the search.
     Database,
-}
-
-impl Default for Evaluator {
-    fn default() -> Self {
-        Evaluator::Search
-    }
 }
 
 /// Win/total counts for one candidate move.
@@ -67,99 +70,12 @@ pub enum RaiseOutcome {
     },
 }
 
-/// Target score: the first team to reach this wins the game.
-pub const WINNING_POINTS: usize = 13;
-/// Once a team's score reaches this value, that team is no longer
-/// allowed to *propose* a raise (they can still answer raises from the
-/// other team and play the round out).
-pub const RAISE_LOCKOUT_SCORE: usize = 10;
-pub const ROUND_POINTS: usize = 2;
-pub const TRICKS_PER_ROUND: usize = 5;
-
+/// Placeholder card used to initialise fixed-size stack buffers before
+/// they are filled in. Never read.
 const DUMMY_CARD: Card = Card {
     suit: Suit::Hearts,
     rank: Rank::Seven,
 };
-
-pub fn rank_value(r: Rank) -> u8 {
-    match r {
-        Rank::Seven => 1,
-        Rank::Eight => 2,
-        Rank::Nine => 3,
-        Rank::Ten => 4,
-        Rank::Unter => 5,
-        Rank::Ober => 6,
-        Rank::King => 7,
-        Rank::Ace => 8,
-        Rank::Weli => 9,
-    }
-}
-
-/// Round-level score for a card given the round's Rechte (trump suit +
-/// striker rank). Fixed for the whole round.
-///   - Trump suit: +100
-///   - Striker rank: +200
-///   (the Rechte is both → 300)
-pub fn round_score(card: &Card, rechte: Card) -> i16 {
-    let mut s = 0;
-    if card.suit == rechte.suit {
-        s += 100;
-    }
-    if card.rank == rechte.rank {
-        s += 200;
-    }
-    s
-}
-
-/// Trick-level score for a card. Depends on the order it was played in
-/// the current trick.
-///   - If the card has striker rank AND an earlier card in the trick
-///     also had striker rank, the trick score is **-400** (overrides
-///     everything else).
-///   - Else if the card's suit matches the *lead* card's suit, the trick
-///     score is `rank_value + 20`.
-///   - Else the trick score is `rank_value` (i.e. cards still rank
-///     against each other within their suit even when off-lead).
-pub fn trick_score(card: &Card, position: usize, trick: &[Card], rechte: Card) -> i16 {
-    if card.rank == rechte.rank {
-        for earlier in 0..position {
-            if trick[earlier].rank == rechte.rank {
-                return -400;
-            }
-        }
-    }
-    let lead_suit = trick[0].suit;
-    let rv = rank_value(card.rank) as i16;
-    if card.suit == lead_suit {
-        rv + 20
-    } else {
-        rv
-    }
-}
-
-/// Total comparable score for a card in a trick:
-///   `round_score + trick_score`
-/// Use strict `>` to determine the trick winner so the earliest play wins
-/// ties.
-pub fn card_score(card: &Card, position: usize, trick: &[Card], rechte: Card) -> i16 {
-    round_score(card, rechte) + trick_score(card, position, trick, rechte)
-}
-
-/// Position in `trick` (0..4) of the card that wins. Ties go to the
-/// earliest play.
-pub fn trick_winner_position(trick: &[Card], rechte: Card) -> usize {
-    let mut best = 0;
-    let mut best_score = card_score(&trick[0], 0, trick, rechte);
-    for pos in 1..trick.len() {
-        let s = card_score(&trick[pos], pos, trick, rechte);
-        if s > best_score {
-            best_score = s;
-            best = pos;
-        }
-    }
-    best
-}
-
 
 fn simulate_game(
     hands: &[[Card; TRICKS_PER_ROUND]; 4],
@@ -170,10 +86,6 @@ fn simulate_game(
     let mut pos = [0usize; 4];
     let mut lead = (dealer + 1) % 4;
     let mut tricks = [0usize; 2];
-    let dummy = Card {
-        suit: Suit::Hearts,
-        rank: Rank::Seven,
-    };
     let is_seeing = |p: usize| p == dealer || p == (dealer + 1) % 4;
     for _ in 0..TRICKS_PER_ROUND {
         let lead_card = hands[lead][perms[lead][pos[lead]]];
@@ -181,7 +93,7 @@ fn simulate_game(
         // Stack-allocated trick buffers — avoids ~2 heap allocs per trick
         // (~2 × 5 × 120^4 = ~2 billion allocations in a full populate).
         let mut players: [usize; 4] = [lead, 0, 0, 0];
-        let mut trick_cards: [Card; 4] = [lead_card, dummy, dummy, dummy];
+        let mut trick_cards: [Card; 4] = [lead_card, DUMMY_CARD, DUMMY_CARD, DUMMY_CARD];
         for off in 1..4usize {
             let idx = (lead + off) % 4;
             let card = hands[idx][perms[idx][pos[idx]]];
@@ -819,7 +731,6 @@ impl GameState {
                 played.push((lead, card));
                 card
             };
-            let lead_suit = lead_card.suit;
             for offset in 1..4 {
                 let p_idx = (lead + offset) % 4;
                 let allowed = self.allowed_indices(p_idx, lead_card);
@@ -891,7 +802,6 @@ impl GameState {
                 played.push((lead, card));
                 card
             };
-            let lead_suit = lead_card.suit;
             for offset in 1..4 {
                 let p_idx = (lead + offset) % 4;
                 let allowed = self.allowed_indices(p_idx, lead_card);
@@ -1443,7 +1353,6 @@ mod tests {
         players[3].hand.push(Card::new(Suit::Acorns, Rank::Ace));
 
         let lead_card = players[0].play_card(&[0], None);
-        let lead_suit = lead_card.suit;
         let mut cards = vec![lead_card];
         for i in 1..4 {
             let allowed: Vec<usize> = (0..players[i].hand.len()).collect();

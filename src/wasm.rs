@@ -2,8 +2,48 @@ use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen as swb;
 use wasm_bindgen::prelude::*;
 
-use crate::game::{Evaluator, GameState};
-use crate::{Rank, Suit};
+use crate::game::{Evaluator, GameState, RaiseOutcome, RoundStep};
+use crate::{Card, Rank, Suit};
+
+/// Convert a [`RaiseOutcome`] (or `Err`) into the JSON shape consumed by
+/// the frontend. Used by both `respond_to_raise` and `auto_respond_raise`.
+fn raise_outcome_to_js(out: Result<RaiseOutcome, &'static str>) -> JsValue {
+    #[derive(Serialize)]
+    struct Accepted {
+        accepted: bool,
+        proposing_team: usize,
+        new_value: usize,
+    }
+    #[derive(Serialize)]
+    struct Folded {
+        accepted: bool,
+        winning_team: usize,
+        points: usize,
+        ended: bool,
+    }
+    match out {
+        Ok(RaiseOutcome::Accepted {
+            proposing_team,
+            new_value,
+        }) => swb::to_value(&Accepted {
+            accepted: true,
+            proposing_team,
+            new_value,
+        })
+        .unwrap_or(JsValue::NULL),
+        Ok(RaiseOutcome::Folded {
+            winning_team,
+            points,
+        }) => swb::to_value(&Folded {
+            accepted: false,
+            winning_team,
+            points,
+            ended: true,
+        })
+        .unwrap_or(JsValue::NULL),
+        Err(_) => JsValue::NULL,
+    }
+}
 
 #[wasm_bindgen]
 pub struct WasmGame {
@@ -16,12 +56,37 @@ pub struct JsCard {
     rank: Rank,
 }
 
+impl From<Card> for JsCard {
+    fn from(c: Card) -> Self {
+        JsCard {
+            suit: c.suit,
+            rank: c.rank,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct JsRoundStep {
     player: usize,
     hand: Vec<JsCard>,
     allowed: Vec<usize>,
     played: JsCard,
+}
+
+impl From<RoundStep> for JsRoundStep {
+    fn from(s: RoundStep) -> Self {
+        JsRoundStep {
+            player: s.player,
+            hand: s.hand.into_iter().map(JsCard::from).collect(),
+            allowed: s.allowed,
+            played: s.played.into(),
+        }
+    }
+}
+
+/// Map a Vec of native [`RoundStep`] into the JS-facing shape.
+fn to_js_steps(steps: Vec<RoundStep>) -> Vec<JsRoundStep> {
+    steps.into_iter().map(JsRoundStep::from).collect()
 }
 
 #[wasm_bindgen]
@@ -101,90 +166,14 @@ impl WasmGame {
     ///   `{ accepted: false, winning_team: T, points: N, ended: true }` on fold
     /// Returns `null` if there's no pending raise or the call is invalid.
     pub fn respond_to_raise(&mut self, team: usize, accept: bool) -> JsValue {
-        match self.inner.respond_to_raise(team, accept) {
-            Ok(crate::game::RaiseOutcome::Accepted {
-                proposing_team,
-                new_value,
-            }) => {
-                #[derive(Serialize)]
-                struct Out {
-                    accepted: bool,
-                    proposing_team: usize,
-                    new_value: usize,
-                }
-                swb::to_value(&Out {
-                    accepted: true,
-                    proposing_team,
-                    new_value,
-                })
-                .unwrap_or(JsValue::NULL)
-            }
-            Ok(crate::game::RaiseOutcome::Folded {
-                winning_team,
-                points,
-            }) => {
-                #[derive(Serialize)]
-                struct Out {
-                    accepted: bool,
-                    winning_team: usize,
-                    points: usize,
-                    ended: bool,
-                }
-                swb::to_value(&Out {
-                    accepted: false,
-                    winning_team,
-                    points,
-                    ended: true,
-                })
-                .unwrap_or(JsValue::NULL)
-            }
-            Err(_) => JsValue::NULL,
-        }
+        raise_outcome_to_js(self.inner.respond_to_raise(team, accept))
     }
 
     /// Decide the response to a pending raise on behalf of the *opposing*
     /// team using the move evaluator as a heuristic. Returns the same
     /// shape as `respond_to_raise`.
     pub fn auto_respond_raise(&mut self) -> JsValue {
-        match self.inner.auto_respond_raise() {
-            Ok(crate::game::RaiseOutcome::Accepted {
-                proposing_team,
-                new_value,
-            }) => {
-                #[derive(Serialize)]
-                struct Out {
-                    accepted: bool,
-                    proposing_team: usize,
-                    new_value: usize,
-                }
-                swb::to_value(&Out {
-                    accepted: true,
-                    proposing_team,
-                    new_value,
-                })
-                .unwrap_or(JsValue::NULL)
-            }
-            Ok(crate::game::RaiseOutcome::Folded {
-                winning_team,
-                points,
-            }) => {
-                #[derive(Serialize)]
-                struct Out {
-                    accepted: bool,
-                    winning_team: usize,
-                    points: usize,
-                    ended: bool,
-                }
-                swb::to_value(&Out {
-                    accepted: false,
-                    winning_team,
-                    points,
-                    ended: true,
-                })
-                .unwrap_or(JsValue::NULL)
-            }
-            Err(_) => JsValue::NULL,
-        }
+        raise_outcome_to_js(self.inner.auto_respond_raise())
     }
 
     /// Concede the current round on behalf of `team`. The round outcome is
@@ -200,26 +189,7 @@ impl WasmGame {
     /// as `play_round_logged` / `advance_bots`, plus a flag indicating
     /// whether the round actually ended.
     pub fn auto_play_round(&mut self) -> JsValue {
-        let steps = self.inner.auto_play_round();
-        let js_steps: Vec<JsRoundStep> = steps
-            .into_iter()
-            .map(|s| JsRoundStep {
-                player: s.player,
-                hand: s
-                    .hand
-                    .iter()
-                    .map(|c| JsCard {
-                        suit: c.suit,
-                        rank: c.rank,
-                    })
-                    .collect(),
-                allowed: s.allowed,
-                played: JsCard {
-                    suit: s.played.suit,
-                    rank: s.played.rank,
-                },
-            })
-            .collect();
+        let js_steps = to_js_steps(self.inner.auto_play_round());
         // round_ended is true iff playing_round flipped off (finish_round was
         // hit). The caller uses this to know when to deal a new round.
         let ended = !self.inner.playing_round;
@@ -281,11 +251,7 @@ impl WasmGame {
     /// `hand(...)`. Returns null before a round has been started.
     pub fn rechte(&self) -> JsValue {
         match self.inner.rechte {
-            Some(c) => swb::to_value(&JsCard {
-                suit: c.suit,
-                rank: c.rank,
-            })
-            .unwrap_or(JsValue::NULL),
+            Some(c) => swb::to_value(&JsCard::from(c)).unwrap_or(JsValue::NULL),
             None => JsValue::NULL,
         }
     }
@@ -304,60 +270,20 @@ impl WasmGame {
         let cards: Vec<JsCard> = self.inner.players[idx]
             .hand
             .iter()
-            .map(|c| JsCard {
-                suit: c.suit,
-                rank: c.rank,
-            })
+            .copied()
+            .map(JsCard::from)
             .collect();
         swb::to_value(&cards).unwrap()
     }
 
     pub fn play_round_logged(&mut self) -> JsValue {
         let (result, steps) = self.inner.play_round_logged();
-        let js_steps: Vec<JsRoundStep> = steps
-            .into_iter()
-            .map(|s| JsRoundStep {
-                player: s.player,
-                hand: s
-                    .hand
-                    .iter()
-                    .map(|c| JsCard {
-                        suit: c.suit,
-                        rank: c.rank,
-                    })
-                    .collect(),
-                allowed: s.allowed,
-                played: JsCard {
-                    suit: s.played.suit,
-                    rank: s.played.rank,
-                },
-            })
-            .collect();
-        swb::to_value(&(result as u8, js_steps)).unwrap()
+        swb::to_value(&(result as u8, to_js_steps(steps))).unwrap()
     }
 
     pub fn advance_bots(&mut self) -> JsValue {
         let (res, steps) = self.inner.advance_bots();
-        let js_steps: Vec<JsRoundStep> = steps
-            .into_iter()
-            .map(|s| JsRoundStep {
-                player: s.player,
-                hand: s
-                    .hand
-                    .iter()
-                    .map(|c| JsCard {
-                        suit: c.suit,
-                        rank: c.rank,
-                    })
-                    .collect(),
-                allowed: s.allowed,
-                played: JsCard {
-                    suit: s.played.suit,
-                    rank: s.played.rank,
-                },
-            })
-            .collect();
-        swb::to_value(&(res.map(|r| r as u8), js_steps)).unwrap()
+        swb::to_value(&(res.map(|r| r as u8), to_js_steps(steps))).unwrap()
     }
 
     pub fn human_allowed_indices(&self) -> JsValue {
@@ -435,25 +361,6 @@ impl WasmGame {
 
     pub fn human_play(&mut self, idx: usize) -> JsValue {
         let (res, steps) = self.inner.human_play(idx);
-        let js_steps: Vec<JsRoundStep> = steps
-            .into_iter()
-            .map(|s| JsRoundStep {
-                player: s.player,
-                hand: s
-                    .hand
-                    .iter()
-                    .map(|c| JsCard {
-                        suit: c.suit,
-                        rank: c.rank,
-                    })
-                    .collect(),
-                allowed: s.allowed,
-                played: JsCard {
-                    suit: s.played.suit,
-                    rank: s.played.rank,
-                },
-            })
-            .collect();
-        swb::to_value(&(res.map(|r| r as u8), js_steps)).unwrap()
+        swb::to_value(&(res.map(|r| r as u8), to_js_steps(steps))).unwrap()
     }
 }

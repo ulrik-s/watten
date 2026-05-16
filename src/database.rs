@@ -25,15 +25,14 @@ pub trait GameDatabase {
 }
 
 /// In-memory implementation of [`GameDatabase`].
+#[derive(Default)]
 pub struct InMemoryGameDatabase {
     results: HashMap<u32, GameResult>,
 }
 
 impl InMemoryGameDatabase {
     pub fn new() -> Self {
-        Self {
-            results: HashMap::new(),
-        }
+        Self::default()
     }
 
     fn make_index(p1: usize, p2: usize, p3: usize, p4: usize) -> u32 {
@@ -106,7 +105,7 @@ impl FlatGameDatabase {
 
     #[inline]
     fn index(p1: usize, p2: usize, p3: usize, p4: usize) -> usize {
-        (((p1 * HAND_PERMUTATIONS + p2) * HAND_PERMUTATIONS + p3) * HAND_PERMUTATIONS + p4)
+        ((p1 * HAND_PERMUTATIONS + p2) * HAND_PERMUTATIONS + p3) * HAND_PERMUTATIONS + p4
     }
 
     #[inline]

@@ -14,7 +14,7 @@
 
 use std::cell::RefCell;
 
-use crate::database::{FlatGameDatabase, GameDatabase, InMemoryGameDatabase};
+use crate::database::{FlatGameDatabase, GameDatabase};
 use crate::game::{play_hand, MoveEvaluation, TRICKS_PER_ROUND};
 use crate::search::{
     evaluate_moves as search_evaluate_moves, SearchMemo, SearchPosition,
@@ -260,8 +260,6 @@ impl MoveEvaluator for DatabaseEvaluator {
                 let tx = tx.clone();
                 let indices = indices.clone();
                 let hands = *orig_hands;
-                let dealer = dealer;
-                let rechte = rechte;
                 let perms = perms.clone();
                 thread::spawn(move || {
                     let len = indices.len();

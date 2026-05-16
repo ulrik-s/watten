@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::game::{card_score, TRICKS_PER_ROUND};
-use crate::{Card, Rank};
+use crate::Card;
 
 /// Per-round transposition table sharing memoization across moves.
 #[derive(Default)]
@@ -73,7 +73,7 @@ fn legal_follow_mask(
     remaining_mask
 }
 
-fn trick_winner(plays: &[(u8, Card); 4], _lead_suit: crate::Suit, rechte: Card) -> u8 {
+fn trick_winner(plays: &[(u8, Card); 4], rechte: Card) -> u8 {
     let trick_cards = [plays[0].1, plays[1].1, plays[2].1, plays[3].1];
     let mut best_pos = 0usize;
     let mut best_score = card_score(&trick_cards[0], 0, &trick_cards, rechte);
@@ -174,7 +174,7 @@ pub fn count_completions(
                         (f2 as u8, c2),
                         (f3 as u8, c3),
                     ];
-                    let winner = trick_winner(&plays, lead_card.suit, pos.rechte);
+                    let winner = trick_winner(&plays, pos.rechte);
                     let next = SearchPosition {
                         orig_hands: pos.orig_hands,
                         remaining: rem4,
@@ -291,8 +291,7 @@ fn enumerate_partial_trick(
     memo: &mut SearchMemo,
 ) {
     if trick_len == 4 {
-        let lead_card = trick_buf[0].1;
-        let winner = trick_winner(trick_buf, lead_card.suit, pos.rechte);
+        let winner = trick_winner(trick_buf, pos.rechte);
         let next = SearchPosition {
             orig_hands: pos.orig_hands,
             remaining,
