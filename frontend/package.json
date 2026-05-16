@@ -8,7 +8,7 @@
     "build:wasm:test": "wasm-pack build --target nodejs --out-dir pkg-test --dev",
     "typecheck": "tsc --noEmit",
     "start": "npm run build:wasm && vite",
-    "build": "npm run build:wasm && tsc --noEmit && vite build",
+    "build": "npm run build:wasm && tsc --noEmit -p tsconfig.build.json && vite build",
     "serve": "vite preview",
     "test": "npm run build:wasm:test && vitest run",
     "test:watch": "vitest",
