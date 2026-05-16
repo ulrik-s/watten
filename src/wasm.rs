@@ -254,6 +254,20 @@ impl WasmGame {
         crate::game::RAISE_LOCKOUT_SCORE
     }
 
+    /// Index (0..4) of the dealer for the current round.
+    pub fn dealer(&self) -> usize {
+        self.inner.dealer
+    }
+
+    /// True iff `player_idx` is a "seeing" player this round
+    /// (the dealer or the forehand). Seers see the cards that determine
+    /// trump suit and striker rank — non-seers must deduce them from
+    /// the play.
+    pub fn is_seer(&self, player_idx: usize) -> bool {
+        let dealer = self.inner.dealer;
+        player_idx == dealer || player_idx == (dealer + 1) % 4
+    }
+
     pub fn trump_suit(&self) -> Option<String> {
         self.inner.trump_suit().map(|s| s.to_string())
     }

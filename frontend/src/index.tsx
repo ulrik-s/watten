@@ -39,7 +39,10 @@ const FAST_MODE =
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).get('fast') === '1';
 const STEP_MS = FAST_MODE ? 10 : 320;
-const TRICK_HOLD_MS = FAST_MODE ? 50 : 1900;
+// Hold the completed trick on screen long enough that a non-seer (who
+// doesn't see trump/striker on the header) can reason about why a card
+// won. 3.5 s is enough to read four cards and the winner banner.
+const TRICK_HOLD_MS = FAST_MODE ? 50 : 3500;
 const ROUND_GAP_MS = FAST_MODE ? 50 : 1800;
 
 function sleep(ms: number) {
@@ -151,6 +154,8 @@ const App = () => {
   const [roundPoints, setRoundPoints] = useState(2);
   const [winningPoints, setWinningPoints] = useState(13);
   const [raiseLockoutScore, setRaiseLockoutScore] = useState(10);
+  const [dealer, setDealer] = useState(0);
+  const [humanIsSeer, setHumanIsSeer] = useState(true);
   const [gameOver, setGameOver] = useState<null | { winner: 1 | 2; final: [number, number] }>(null);
   const [busy, setBusy] = useState(false);
   const [roundNumber, setRoundNumber] = useState(1);
@@ -197,6 +202,11 @@ const App = () => {
       const r = ((g as any).rechte?.() ?? null) as JsCard | null;
       rechteRef.current = r;
       setRechte(r);
+      const d = ((g as any).dealer?.() ?? 0) as number;
+      setDealer(d);
+      setHumanIsSeer(
+        ((g as any).is_seer?.(0) ?? (d === 0 || d === 3)) as boolean
+      );
       // Capture the original 5-card hand for the human.
       const orig = g.hand(0) as JsCard[];
       slotsRef.current = padSlots(orig);
@@ -378,6 +388,11 @@ const App = () => {
     const r = ((g as any).rechte?.() ?? null) as JsCard | null;
     rechteRef.current = r;
     setRechte(r);
+    const d = ((g as any).dealer?.() ?? 0) as number;
+    setDealer(d);
+    setHumanIsSeer(
+      ((g as any).is_seer?.(0) ?? (d === 0 || d === 3)) as boolean
+    );
     setOpponentHandSizes([5, 5, 5, 5]);
     const orig = g.hand(0) as JsCard[];
     slotsRef.current = padSlots(orig);
@@ -584,10 +599,24 @@ const App = () => {
   return (
     <div className="app">
       <h1>Watten</h1>
-      <p className="info">
+      <p className="info" data-testid="round-info">
         Round <strong>{roundNumber}</strong>
-        &nbsp;·&nbsp; Trump: <strong>{trump ?? '-'}</strong>
-        &nbsp;·&nbsp; Striker: <strong>{striker ?? '-'}</strong>
+        &nbsp;·&nbsp; Dealer: <strong>P{dealer + 1}</strong>
+        {(humanIsSeer || showDebug) ? (
+          <>
+            &nbsp;·&nbsp; Trump:{' '}
+            <strong data-testid="trump-display">{trump ?? '-'}</strong>
+            &nbsp;·&nbsp; Striker:{' '}
+            <strong data-testid="striker-display">{striker ?? '-'}</strong>
+            {!humanIsSeer && showDebug ? (
+              <span className="debug-note"> (debug)</span>
+            ) : null}
+          </>
+        ) : (
+          <span className="hidden-trump-hint">
+            &nbsp;·&nbsp; <em>Trump & Striker hidden — you're not a seer this round</em>
+          </span>
+        )}
       </p>
       <p className="info">
         Scores: Team 1 {scores[0]} — Team 2 {scores[1]} (to {winningPoints})
