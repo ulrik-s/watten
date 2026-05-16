@@ -6,8 +6,9 @@
   "scripts": {
     "build:wasm": "wasm-pack build --target web --out-dir frontend/pkg",
     "build:wasm:test": "wasm-pack build --target nodejs --out-dir pkg-test --dev",
+    "typecheck": "tsc --noEmit",
     "start": "npm run build:wasm && vite",
-    "build": "npm run build:wasm && vite build",
+    "build": "npm run build:wasm && tsc --noEmit && vite build",
     "serve": "vite preview",
     "test": "npm run build:wasm:test && vitest run",
     "test:watch": "vitest",

@@ -7,6 +7,8 @@ import {
   JsCard,
   TrickEntry,
   displayRank,
+  roundScore,
+  trickScore,
   trickWinnerIndex,
 } from './scoring';
 
@@ -115,8 +117,8 @@ const App = () => {
       setRaiseLockoutScore((g as any).raise_lockout_score?.() ?? 10);
       g.start_round_interactive();
       setGame(g);
-      setTrump(g.trump_suit());
-      setStriker(g.striker_rank());
+      setTrump(g.trump_suit() ?? null);
+      setStriker(g.striker_rank() ?? null);
       const r = ((g as any).rechte?.() ?? null) as JsCard | null;
       rechteRef.current = r;
       setRechte(r);
@@ -177,7 +179,7 @@ const App = () => {
 
     setAllowedSlots(allowedSet);
     setEvalBySlot(evalMap);
-    setScores(g.scores() as [number, number]);
+    setScores(g.scores() as unknown as [number, number]);
     setRoundPoints((g as any).round_points?.() ?? 2);
     refreshTricksThisRound(g);
   }
@@ -275,7 +277,7 @@ const App = () => {
   }
 
   async function handleRoundEnded(g: WasmGame) {
-    const s = g.scores() as [number, number];
+    const s = g.scores() as unknown as [number, number];
     setScores(s);
     setLog((prev) => [
       ...prev,
@@ -301,8 +303,8 @@ const App = () => {
     setLastRaiseBy(null);
     setTricksThisRound([0, 0]);
     g.start_round_interactive();
-    setTrump(g.trump_suit());
-    setStriker(g.striker_rank());
+    setTrump(g.trump_suit() ?? null);
+    setStriker(g.striker_rank() ?? null);
     const r = ((g as any).rechte?.() ?? null) as JsCard | null;
     rechteRef.current = r;
     setRechte(r);
