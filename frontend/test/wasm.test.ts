@@ -86,6 +86,49 @@ describe('WasmGame round flow', () => {
     }
   });
 
+  it('an accepted raise pays out at the raised value when the round is won', () => {
+    // Drive a complete game with a single human, where we explicitly:
+    //   1. raise (propose + accept)
+    //   2. play the remaining cards through human_play / advance_bots
+    //   3. assert that the points awarded match the raised value
+    const g = new wasm.WasmGame(1);
+    g.start_round_interactive();
+    g.advance_bots();
+
+    const roundBefore = (g as any).round_points?.() ?? 2;
+    const scoresBefore = Array.from(g.scores()) as [number, number];
+
+    // Team 1 proposes; force-accept by calling respond_to_raise directly
+    // (auto_respond_raise might fold based on the search heuristic — we
+    // want to test the ACCEPT path deterministically).
+    const ok = (g as any).propose_raise?.(0);
+    expect(ok).toBe(true);
+    const out = (g as any).respond_to_raise?.(1, true) as any;
+    expect(out).not.toBeNull();
+    expect(out.accepted).toBe(true);
+    expect(out.new_value).toBe(roundBefore + 1);
+    expect((g as any).round_points()).toBe(roundBefore + 1);
+
+    // Now play the round to completion by clicking the human's cards.
+    // After every human_play we may need to consume any auto-advanced bot
+    // steps that brought the game back to the human's turn.
+    let guard = 0;
+    while (guard++ < 30) {
+      const allowed = g.human_allowed_indices() as number[];
+      if (allowed.length === 0) break;
+      const [res, _steps] = g.human_play(allowed[0]) as [number | undefined, unknown[]];
+      if (typeof res === 'number') break; // round ended
+    }
+
+    // Round must have ended. Exactly one team got points equal to the
+    // raised value (roundBefore + 1).
+    const scoresAfter = Array.from(g.scores()) as [number, number];
+    const gain0 = scoresAfter[0] - scoresBefore[0];
+    const gain1 = scoresAfter[1] - scoresBefore[1];
+    expect(gain0 + gain1).toBe(roundBefore + 1);
+    expect(Math.max(gain0, gain1)).toBe(roundBefore + 1);
+  });
+
   it('lets a team concede the round and awards points to the opponent', () => {
     const g = new wasm.WasmGame(0);
     g.start_round_interactive();

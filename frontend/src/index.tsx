@@ -652,8 +652,9 @@ const App = () => {
       </div>
       {decidedFor !== null && (
         <p className="round-decided" data-testid="round-decided">
-          Round outcome locked in: Team {decidedFor + 1} will take the round
-          when all cards are played.
+          Round outcome locked in: Team {decidedFor + 1} will take{' '}
+          <strong>{roundPoints}</strong> point{roundPoints === 1 ? '' : 's'} when
+          all cards are played.
         </p>
       )}
       {gameOver && (

@@ -11,19 +11,36 @@ async function waitForReady(page: Page) {
   await page.locator(SELECTABLE).first().waitFor({ state: 'visible', timeout: 30000 });
 }
 
-/** Click any selectable cards until the human's hand is empty or the round
- *  rolls over. Used to drive a round to its natural end after a concede /
- *  fold when the engine no longer auto-plays. */
+async function readRoundNumberFromUI(page: Page): Promise<number> {
+  const text = await page
+    .locator('p')
+    .filter({ hasText: /^Round\s/ })
+    .first()
+    .innerText();
+  const m = text.match(/Round\s+(\d+)/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+/** Click selectable cards until the round counter advances OR the human's
+ *  hand is empty. Stops at the next round's deal so we don't bleed into
+ *  subsequent rounds. Keeps DOM reads cheap by sampling the round-number
+ *  only at boundaries. */
 async function clickHandToEnd(page: Page, maxClicks = 30) {
+  const startRound = await readRoundNumberFromUI(page);
   for (let i = 0; i < maxClicks; i++) {
     const card = page.locator(SELECTABLE).first();
     try {
       await card.waitFor({ state: 'visible', timeout: 3000 });
     } catch {
-      return;
+      // No card available — round most likely transitioned.
+      await page.waitForTimeout(200);
+      if ((await readRoundNumberFromUI(page)) !== startRound) return;
+      continue;
     }
     await card.click();
     await page.waitForTimeout(120);
+    // After every click, ONE DOM read to bail when the round rolls.
+    if ((await readRoundNumberFromUI(page)) !== startRound) return;
   }
 }
 
@@ -206,6 +223,73 @@ test.describe('widgets', () => {
         return m ? parseInt(m[1], 10) + parseInt(m[2], 10) : 0;
       }, { timeout: 10000 })
       .toBeGreaterThanOrEqual(1);
+  });
+
+  test('Accepted raise pays the round at its raised value (not pre-raise)', async ({ page }) => {
+    test.setTimeout(180000);
+    await waitForReady(page);
+
+    async function readScoresNow() {
+      const text = await page
+        .locator('p')
+        .filter({ hasText: /Team 1/ })
+        .first()
+        .innerText();
+      const m = text.match(/Team\s*1\s*(\d+)\s*[—-]\s*Team\s*2\s*(\d+)/);
+      return { team1: parseInt(m![1], 10), team2: parseInt(m![2], 10) };
+    }
+
+    for (let attempt = 0; attempt < 12; attempt++) {
+      // If a round transition is in flight, wait for it to settle.
+      await page
+        .locator('.hand-slot .card.selectable')
+        .first()
+        .waitFor({ state: 'visible', timeout: 15000 });
+
+      const beforeScores = await readScoresNow();
+      const beforePts = await readRoundPoints(page);
+      const round = await readRoundNumberFromUI(page);
+
+      await page.getByRole('button', { name: /Raise/ }).click();
+      const resolved = await Promise.race([
+        page
+          .locator('.log')
+          .getByText(/Team 2 accepts/)
+          .nth(attempt)
+          .waitFor({ state: 'visible', timeout: 8000 })
+          .then(() => 'accepted' as const),
+        page
+          .locator('.log')
+          .getByText(/Team 2 folds/)
+          .waitFor({ state: 'visible', timeout: 8000 })
+          .then(() => 'folded' as const),
+      ]).catch(() => null);
+
+      if (resolved === 'accepted') {
+        expect(await readRoundPoints(page)).toBe(beforePts + 1);
+        // Play exactly this round's 5 cards. clickHandToEnd now bails the
+        // moment the round counter advances.
+        await clickHandToEnd(page);
+        // Wait for the round counter to actually advance.
+        await expect
+          .poll(() => readRoundNumberFromUI(page), { timeout: 30000 })
+          .toBe(round + 1);
+        const afterScores = await readScoresNow();
+        const gain1 = afterScores.team1 - beforeScores.team1;
+        const gain2 = afterScores.team2 - beforeScores.team2;
+        // Exactly one team got points and it equals the raised value.
+        expect(gain1 + gain2).toBe(beforePts + 1);
+        expect(Math.max(gain1, gain2)).toBe(beforePts + 1);
+        return;
+      }
+
+      // Folded or timed out — play out this round and try the next.
+      await clickHandToEnd(page);
+      await expect
+        .poll(() => readRoundNumberFromUI(page), { timeout: 30000 })
+        .toBe(round + 1);
+    }
+    throw new Error('Team 2 never accepted a raise in 12 attempts');
   });
 
   test('Teams P1+P3 vs P2+P4 are tagged in the UI; seeing players are split', async ({ page }) => {
