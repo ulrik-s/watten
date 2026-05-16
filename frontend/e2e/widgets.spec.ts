@@ -21,13 +21,14 @@ async function readRoundNumberFromUI(page: Page): Promise<number> {
   return m ? parseInt(m[1], 10) : 0;
 }
 
-/** Click selectable cards until the round counter advances OR the human's
- *  hand is empty. Stops at the next round's deal so we don't bleed into
- *  subsequent rounds. Keeps DOM reads cheap by sampling the round-number
- *  only at boundaries. */
+/** Click selectable cards until the round counter advances, the human's
+ *  hand is empty, OR the game ends. Stops at the next round's deal so we
+ *  don't bleed into subsequent rounds. */
 async function clickHandToEnd(page: Page, maxClicks = 30) {
   const startRound = await readRoundNumberFromUI(page);
   for (let i = 0; i < maxClicks; i++) {
+    // Game over — no further rounds; bail.
+    if ((await page.locator('.game-over').count()) > 0) return;
     const card = page.locator(SELECTABLE).first();
     try {
       await card.waitFor({ state: 'visible', timeout: 3000 });
@@ -35,12 +36,13 @@ async function clickHandToEnd(page: Page, maxClicks = 30) {
       // No card available — round most likely transitioned.
       await page.waitForTimeout(200);
       if ((await readRoundNumberFromUI(page)) !== startRound) return;
+      if ((await page.locator('.game-over').count()) > 0) return;
       continue;
     }
     await card.click();
     await page.waitForTimeout(120);
-    // After every click, ONE DOM read to bail when the round rolls.
     if ((await readRoundNumberFromUI(page)) !== startRound) return;
+    if ((await page.locator('.game-over').count()) > 0) return;
   }
 }
 

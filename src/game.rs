@@ -67,8 +67,12 @@ pub enum RaiseOutcome {
     },
 }
 
-/// Default target score; standard Watten ranges 11..18 depending on variant.
-pub const WINNING_POINTS: usize = 15;
+/// Target score: the first team to reach this wins the game.
+pub const WINNING_POINTS: usize = 13;
+/// Once a team's score reaches this value, that team is no longer
+/// allowed to *propose* a raise (they can still answer raises from the
+/// other team and play the round out).
+pub const RAISE_LOCKOUT_SCORE: usize = 10;
 pub const ROUND_POINTS: usize = 2;
 pub const TRICKS_PER_ROUND: usize = 5;
 
@@ -619,6 +623,12 @@ impl GameState {
         }
         if self.round_decided.is_some() {
             return Err("round outcome is already decided");
+        }
+        if self.scores[team] >= RAISE_LOCKOUT_SCORE {
+            // Once a team has reached the lockout threshold (10 points by
+            // default) they may no longer propose raises. They can still
+            // answer raises from the opposing team.
+            return Err("team has reached the raise-lockout threshold");
         }
         if self.last_raise_by == Some(team) {
             // Alternation rule: once a team's raise has been accepted, that
@@ -1393,6 +1403,29 @@ mod tests {
         // No further raises by either team while round_decided is set.
         assert!(g.propose_raise(0).is_err());
         assert!(g.propose_raise(1).is_err());
+    }
+
+    #[test]
+    fn team_at_lockout_score_cannot_propose_raise() {
+        // Once a team has reached RAISE_LOCKOUT_SCORE (10) points they
+        // can no longer propose raises. The other team still can.
+        let mut g = GameState::new(0);
+        g.playing_round = true;
+        g.scores[0] = RAISE_LOCKOUT_SCORE;        // Team 1 at threshold
+        g.scores[1] = RAISE_LOCKOUT_SCORE - 1;    // Team 2 just below
+        assert!(g.propose_raise(0).is_err(), "Team 1 must be locked out");
+        assert!(g.propose_raise(1).is_ok(), "Team 2 is still allowed to raise");
+        // Team 1 *can* still answer the raise.
+        let outcome = g.respond_to_raise(0, true).unwrap();
+        assert!(matches!(outcome, RaiseOutcome::Accepted { .. }));
+        assert_eq!(g.round_points, ROUND_POINTS + 1);
+    }
+
+    #[test]
+    fn winning_score_is_thirteen() {
+        // Hard constant: the spec calls for a 13-point game.
+        assert_eq!(WINNING_POINTS, 13);
+        assert_eq!(RAISE_LOCKOUT_SCORE, 10);
     }
 
     #[test]

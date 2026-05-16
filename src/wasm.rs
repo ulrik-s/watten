@@ -249,6 +249,11 @@ impl WasmGame {
         crate::game::WINNING_POINTS
     }
 
+    /// A team at or above this score may not propose raises any more.
+    pub fn raise_lockout_score(&self) -> usize {
+        crate::game::RAISE_LOCKOUT_SCORE
+    }
+
     pub fn trump_suit(&self) -> Option<String> {
         self.inner.trump_suit().map(|s| s.to_string())
     }

@@ -86,6 +86,46 @@ describe('WasmGame round flow', () => {
     }
   });
 
+  it('exposes the new 13-point target and the 10-point raise lockout', () => {
+    const g = new wasm.WasmGame(0);
+    if (typeof g.winning_points === 'function') expect(g.winning_points()).toBe(13);
+    if (typeof g.raise_lockout_score === 'function')
+      expect(g.raise_lockout_score()).toBe(10);
+  });
+
+  it('a team at 10+ points cannot propose a raise but can still accept one', () => {
+    const g = new wasm.WasmGame(0);
+    g.start_round_interactive();
+    // Hack scores via the Watten engine: there is no public setter, so
+    // we simulate by playing concedes from Team 1 to accumulate Team 2's
+    // score over several rounds. Easier: just expose `playing_round = true`
+    // and call propose with a pre-seeded score via the wasm fake; for now
+    // we go via concede.
+    // Force a state where Team 1 has >= 10 by conceding 5 times in a row.
+    for (let i = 0; i < 5; i++) {
+      g.concede_round(1); // team 2 concedes → team 1 gains round_points
+      // Play out the round so finish_round actually credits scores.
+      // Use auto_play_round (we constructed with 0 humans, so all bots).
+      const out = (g as any).auto_play_round?.();
+      // Bot/UI cleanup not strictly needed; in 0-humans mode every play
+      // runs deterministically.
+      void out;
+      g.start_round_interactive();
+    }
+    const scores = Array.from(g.scores()) as [number, number];
+    expect(scores[0]).toBeGreaterThanOrEqual(10);
+    // Team 1 is at >= 10 — they should NOT be allowed to propose a raise.
+    const proposed = g.propose_raise(0);
+    expect(proposed).toBe(false);
+    // Team 2 still can.
+    const proposed2 = g.propose_raise(1);
+    expect(proposed2).toBe(true);
+    // Team 1 can still answer it.
+    const out = g.respond_to_raise(0, true);
+    expect(out.accepted).toBe(true);
+    expect(out.new_value).toBe(3);
+  });
+
   it('an accepted raise pays out at the raised value when the round is won', () => {
     // Drive a complete game with a single human, where we explicitly:
     //   1. raise (propose + accept)

@@ -149,7 +149,8 @@ const App = () => {
   const [trump, setTrump] = useState<string | null>(null);
   const [striker, setStriker] = useState<string | null>(null);
   const [roundPoints, setRoundPoints] = useState(2);
-  const [winningPoints, setWinningPoints] = useState(15);
+  const [winningPoints, setWinningPoints] = useState(13);
+  const [raiseLockoutScore, setRaiseLockoutScore] = useState(10);
   const [gameOver, setGameOver] = useState<null | { winner: 1 | 2; final: [number, number] }>(null);
   const [busy, setBusy] = useState(false);
   const [roundNumber, setRoundNumber] = useState(1);
@@ -187,7 +188,8 @@ const App = () => {
   useEffect(() => {
     init().then(() => {
       const g = new WasmGame(1);
-      setWinningPoints((g as any).winning_points?.() ?? 15);
+      setWinningPoints((g as any).winning_points?.() ?? 13);
+      setRaiseLockoutScore((g as any).raise_lockout_score?.() ?? 10);
       g.start_round_interactive();
       setGame(g);
       setTrump(g.trump_suit());
@@ -478,6 +480,14 @@ const App = () => {
   async function onRaise() {
     if (!game || busy || gameOver) return;
     if (decidedFor !== null) return;
+    // Lockout: a team at >= RAISE_LOCKOUT_SCORE may not propose raises.
+    if (scores[0] >= raiseLockoutScore) {
+      setLog((prev) => [
+        ...prev,
+        `Team 1 cannot raise — at ${scores[0]} points, the raise lockout (${raiseLockoutScore}+) is in effect.`,
+      ]);
+      return;
+    }
     // Alternation rule: Team 1 cannot raise twice in a row.
     if (lastRaiseBy === 0) {
       setLog((prev) => [
@@ -630,15 +640,23 @@ const App = () => {
         <button
           onClick={onRaise}
           disabled={
-            !game || busy || !!gameOver || decidedFor !== null || lastRaiseBy === 0
+            !game ||
+            busy ||
+            !!gameOver ||
+            decidedFor !== null ||
+            lastRaiseBy === 0 ||
+            scores[0] >= raiseLockoutScore
           }
           title={
-            lastRaiseBy === 0
+            scores[0] >= raiseLockoutScore
+              ? `Team 1 has reached ${raiseLockoutScore} points and may not propose raises any more`
+              : lastRaiseBy === 0
               ? 'Team 2 must raise first (alternation rule)'
               : decidedFor !== null
               ? 'Round outcome is already decided'
               : ''
           }
+          data-testid="raise-button"
         >
           Raise (+1)
         </button>
