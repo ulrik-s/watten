@@ -77,6 +77,53 @@ const DUMMY_CARD: Card = Card {
     rank: Rank::Seven,
 };
 
+/// Local "would this card win the trick, and how cheaply" score used as
+/// a tie-break inside [`GameState::best_card_index_with_trick`] when
+/// several candidate cards yield the same round-win rate.
+///
+/// Larger is better. The big offset distinguishes "take the trick" plays
+/// from "dump the cheapest card" plays so they never cross. Within each
+/// bucket, a lower [`card_score`] wins — that's the cheapest card that
+/// still serves the purpose (take with the smallest trump that wins;
+/// dump the lowest non-trump when we can't take).
+fn trick_local_score(
+    candidate: Card,
+    current_trick: &[(usize, Card)],
+    rechte: Card,
+    team: usize,
+) -> i64 {
+    // Build the hypothetical trick state with the candidate appended.
+    let mut trick: Vec<Card> = current_trick.iter().map(|(_, c)| *c).collect();
+    let pos = trick.len();
+    trick.push(candidate);
+
+    let leader_pos = trick_winner_position(&trick, rechte);
+    // Whose seat currently leads after the candidate's play. If the
+    // candidate itself is leading, the team is whoever just played
+    // (i.e. the caller's team). Otherwise it's the player at
+    // `current_trick[leader_pos]`.
+    let leader_team = if leader_pos == pos {
+        team
+    } else {
+        current_trick[leader_pos].0 % 2
+    };
+
+    let candidate_value = card_score(&candidate, pos, &trick, rechte) as i64;
+
+    const TAKE_TRICK: i64 = 1_000_000;
+    if leader_team == team {
+        // Our team takes this trick (or is going to once it completes
+        // with this candidate added). Prefer the *cheapest* card that
+        // still wins or piles on safely.
+        TAKE_TRICK - candidate_value
+    } else {
+        // Opponent leads after this play. We can't take it — dump the
+        // cheapest card we can spare so stronger ones stay in hand for
+        // tricks we can still win.
+        -candidate_value
+    }
+}
+
 fn simulate_game(
     hands: &[[Card; TRICKS_PER_ROUND]; 4],
     perms: [[usize; TRICKS_PER_ROUND]; 4],
@@ -474,16 +521,62 @@ impl GameState {
         tricks_won: [usize; 2],
     ) -> usize {
         let evals = self.evaluate_moves(p_idx, allowed, current_trick, tricks_won);
-        let mut best_idx = allowed[0];
-        let mut best_rate = -1.0f64;
-        for e in &evals {
-            let rate = e.rate();
-            if rate > best_rate {
-                best_rate = rate;
-                best_idx = e.hand_idx;
+        if evals.is_empty() {
+            return allowed[0];
+        }
+
+        // Primary criterion: maximise the team's round-win rate. The
+        // search/database evaluator already does this optimally over
+        // every legal completion.
+        let max_rate = evals
+            .iter()
+            .map(|e| e.rate())
+            .fold(f64::NEG_INFINITY, f64::max);
+
+        // Secondary criterion: when several cards tie on round-win rate
+        // (extremely common — once a round is essentially decided, *all*
+        // legal cards score the same), fall back to a local heuristic
+        // so the bot still does the obvious thing humans expect:
+        //
+        //   - If the team would take this trick, play the cheapest
+        //     sufficient card (don't waste an Ace when a low trump
+        //     wins).
+        //   - If the team won't take this trick, dump the cheapest card
+        //     in hand (save strength for later tricks).
+        //
+        // Without this tie-break, the engine would pick `allowed[0]` —
+        // the first card in hand order — and frequently leave obvious
+        // tricks on the table in lost-round positions. (That is the
+        // "robotarna spelar fel" symptom users see.)
+        const EPS: f64 = 1e-9;
+        let tied: Vec<&MoveEvaluation> = evals
+            .iter()
+            .filter(|e| (e.rate() - max_rate).abs() < EPS)
+            .collect();
+        if tied.len() == 1 {
+            return tied[0].hand_idx;
+        }
+        let rechte = match self.rechte {
+            Some(r) => r,
+            None => return tied[0].hand_idx,
+        };
+        let team = p_idx % 2;
+        let mut best = tied[0];
+        let mut best_score = trick_local_score(
+            self.players[p_idx].hand[best.hand_idx],
+            current_trick,
+            rechte,
+            team,
+        );
+        for c in tied.iter().skip(1) {
+            let card = self.players[p_idx].hand[c.hand_idx];
+            let s = trick_local_score(card, current_trick, rechte, team);
+            if s > best_score {
+                best_score = s;
+                best = c;
             }
         }
-        best_idx
+        best.hand_idx
     }
 
     /// Backwards-compatible best-card pick assuming the player is leading and
@@ -1711,5 +1804,63 @@ mod tests {
         let t2 = std::time::Instant::now();
         let _ = count_completions(&pos, &mut memo);
         assert!(t2.elapsed().as_millis() <= 5);
+    }
+
+    #[test]
+    fn bot_takes_an_obvious_trick_when_round_outcome_is_a_tie() {
+        // Construct a position where, last to play, the bot can take
+        // the trick with multiple cards but the round-win rate is the
+        // same for every legal candidate. The tie-break must pick the
+        // *cheapest sufficient* trump (the 8) rather than dumping the
+        // first card in hand order.
+        //
+        // Layout: Trump = Hearts, Striker = Seven, so the Rechte is
+        // 7 of Hearts. Lead = 9 of Bells (non-trump). The bot (P4 /
+        // index 3) is last to play; team 2 has already lost this trick
+        // by default unless the bot acts. P4 holds three Hearts cards
+        // — 8, 9, Ace — any of which beats the 9 of Bells lead. The
+        // 8 of Hearts is the cheapest sufficient winner.
+        let mut g = GameState::new(0);
+        g.dealer = 0;
+        g.rechte = Some(Card::new(Suit::Hearts, Rank::Seven));
+        // Only P3's (index 3) hand matters for `best_card_index_with_trick`.
+        g.players[3].hand = vec![
+            Card::new(Suit::Hearts, Rank::Ace), // strongest trump
+            Card::new(Suit::Hearts, Rank::Eight), // cheapest trump that wins
+            Card::new(Suit::Hearts, Rank::Nine),
+        ];
+        // Re-mirror into orig_hands so the search has a consistent view.
+        for i in 0..3 {
+            g.orig_hands[3][i] = g.players[3].hand[i];
+        }
+        // Pad the other slots with dummy cards.
+        for p in 0..3 {
+            g.orig_hands[p] = [
+                Card::new(Suit::Acorns, Rank::Seven),
+                Card::new(Suit::Acorns, Rank::Eight),
+                Card::new(Suit::Acorns, Rank::Nine),
+                Card::new(Suit::Acorns, Rank::Ten),
+                Card::new(Suit::Acorns, Rank::Unter),
+            ];
+            g.players[p].hand = g.orig_hands[p].to_vec();
+        }
+
+        let trick = vec![
+            (0usize, Card::new(Suit::Bells, Rank::Nine)),  // P1 leads
+            (1usize, Card::new(Suit::Bells, Rank::Ten)),
+            (2usize, Card::new(Suit::Bells, Rank::Ober)),
+        ];
+        let allowed = vec![0, 1, 2];
+        let idx = g.best_card_index_with_trick(3, &allowed, &trick, [1, 1]);
+        // Index 1 in P4's hand is the 8 of Hearts — cheapest sufficient
+        // trump. Without the tie-break this would have been index 0
+        // (the Ace) or whichever was first in `allowed`.
+        let picked = g.players[3].hand[idx];
+        assert_eq!(
+            picked,
+            Card::new(Suit::Hearts, Rank::Eight),
+            "bot should take the trick with the cheapest sufficient trump, got {:?}",
+            picked
+        );
     }
 }
