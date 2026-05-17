@@ -195,6 +195,15 @@ pub struct DatabaseEvaluator {
     /// `begin_chunked_populate` has been called and not yet driven to
     /// completion.
     populate: Option<PopulateState>,
+    /// True iff the database content is valid for the current round's
+    /// `orig_hands`. Native `prepare_round` populates synchronously and
+    /// sets this true; WASM `prepare_round` leaves it false and waits for
+    /// a chunked populate to complete.
+    data_ready: bool,
+    /// Fallback evaluator consulted while `data_ready` is false, so the
+    /// bots don't fall back to "first legal card" before the chunked
+    /// populate has finished.
+    fallback: SearchEvaluator,
 }
 
 struct PopulateState {
@@ -214,6 +223,8 @@ impl DatabaseEvaluator {
             perm_range: None,
             workers: num_cpus::get().max(1) * 2,
             populate: None,
+            data_ready: false,
+            fallback: SearchEvaluator::new(),
         }
     }
 
@@ -241,15 +252,36 @@ impl MoveEvaluator for DatabaseEvaluator {
         dealer: usize,
         rechte: Card,
     ) {
+        // Discard any DB content from the previous round — the indices are
+        // per-deal so a stale DB would silently produce wrong answers.
         self.db = Box::new(FlatGameDatabase::new());
-        let perms = all_hand_orders();
-        let indices: Vec<usize> = self
-            .perm_range
-            .clone()
-            .unwrap_or_else(|| (0..perms.len()).collect());
+        self.data_ready = false;
+        // Keep the fallback evaluator in step so it can answer queries
+        // while the DB is still being populated.
+        self.fallback.prepare_round(orig_hands, dealer, rechte);
+
+        // Inline-populating 120^4 ≈ 207M games on the WASM single thread
+        // would block the JS event loop for tens of seconds. Instead leave
+        // the DB empty here; the WASM UI is expected to drive a fresh
+        // chunked populate (`begin_chunked_populate` + repeated
+        // `step_chunked_populate`) after every round transition.
+        // `data_ready` stays false until that chunked populate completes,
+        // so `evaluate_moves` keeps using the search fallback in the
+        // meantime instead of returning all-zero counts.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (orig_hands, dealer, rechte);
+            return;
+        }
 
         #[cfg(not(target_arch = "wasm32"))]
         {
+            let perms = all_hand_orders();
+            let indices: Vec<usize> = self
+                .perm_range
+                .clone()
+                .unwrap_or_else(|| (0..perms.len()).collect());
+
             use std::sync::mpsc::channel;
             use std::thread;
 
@@ -287,25 +319,18 @@ impl MoveEvaluator for DatabaseEvaluator {
                     break;
                 }
             }
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            for &i1 in &indices {
-                for &i2 in &indices {
-                    for &i3 in &indices {
-                        for &i4 in &indices {
-                            let result =
-                                play_hand(orig_hands, [i1, i2, i3, i4], dealer, rechte, &perms);
-                            self.db.set(i1, i2, i3, i4, result);
-                        }
-                    }
-                }
-            }
+            self.data_ready = true;
         }
     }
 
     fn evaluate_moves(&self, ctx: &EvaluationContext<'_>) -> Vec<MoveEvaluation> {
+        // Until the database has been populated for the current deal, ask
+        // the embedded search evaluator. Without this the bots would see
+        // all-zero counts and pick `allowed_orig_indices[0]` every turn —
+        // the "robotarna spelade fel" symptom on the WASM build.
+        if !self.data_ready {
+            return self.fallback.evaluate_moves(ctx);
+        }
         let team = ctx.player % 2;
         let win_result = if team == 0 {
             GameResult::Team1Win as usize
@@ -372,6 +397,10 @@ impl MoveEvaluator for DatabaseEvaluator {
         rechte: Card,
     ) -> usize {
         self.db = Box::new(FlatGameDatabase::new());
+        self.data_ready = false;
+        // Refresh the fallback so it answers queries about the *current*
+        // deal while the chunked populate runs.
+        self.fallback.prepare_round(orig_hands, dealer, rechte);
         let perms = all_hand_orders();
         let indices: Vec<usize> = self
             .perm_range
@@ -423,6 +452,11 @@ impl MoveEvaluator for DatabaseEvaluator {
         let total = state.total;
         if progress < total {
             self.populate = Some(state);
+        } else {
+            // Chunked populate just finished — switch off the fallback so
+            // subsequent move evaluations actually consult the freshly
+            // populated 120⁴ database.
+            self.data_ready = true;
         }
         (progress, total)
     }

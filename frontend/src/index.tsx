@@ -322,6 +322,20 @@ const App = () => {
     // Give the user a beat to register the new deal before bots start.
     await sleep(ROUND_GAP_MS);
     setRoundBanner(null);
+    // The 120⁴ database is keyed by per-deal hand-permutation indices,
+    // so the previous round's entries are meaningless for this deal.
+    // Re-run the chunked populate before letting the bots play, otherwise
+    // they would query an empty DB and fall back to "first legal card".
+    if (useDatabaseEvaluator) {
+      const ok = await runChunkedPopulate(
+        g,
+        `Re-populating 120⁴ database for round ${nextRound}…`
+      );
+      if (!ok) {
+        setBusy(false);
+        return;
+      }
+    }
     const [, st] = g.advance_bots() as [number | null, JsRoundStep[]];
     await processStepsAnimated(st);
     refreshFromGame(g);
@@ -346,6 +360,59 @@ const App = () => {
     }
   }
 
+  // Pump the chunked 120⁴ populate for the current deal. Returns true on
+  // completion, false if the user cancelled (toggled the checkbox off).
+  // Shared by `onToggleEvaluator` (initial activation) and
+  // `handleRoundEnded` (re-populate at every new deal — the indices are
+  // per-deal so the previous round's DB doesn't transfer).
+  async function runChunkedPopulate(g: WasmGame, label: string): Promise<boolean> {
+    cancelDbPopulate.current = false;
+    setEvaluatorBusy(true);
+    setDbProgress(0);
+    setLog((prev) => [...prev, label]);
+    // Defer one tick so React paints the 0% bar before wasm starts.
+    await sleep(0);
+    const total = (g as any).database_populate_begin?.() as number;
+    if (!total || total <= 0) {
+      setEvaluatorBusy(false);
+      setDbProgress(null);
+      setLog((prev) => [...prev, 'Database populate could not start.']);
+      return false;
+    }
+    // Pick a batch size so we yield ~10 times per second on a typical run.
+    // Smaller = smoother bar, larger = less overhead. 200k feels right.
+    const BATCH = 200_000;
+    let done = 0;
+    while (done < total) {
+      if (cancelDbPopulate.current) {
+        (g as any).set_evaluator?.('search');
+        setDbProgress(null);
+        setUseDatabaseEvaluator(false);
+        setEvaluatorBusy(false);
+        setLog((prev) => [...prev, 'Database populate cancelled.']);
+        return false;
+      }
+      const out = (g as any).database_populate_step?.(BATCH) as
+        | null
+        | { done: number; total: number; complete: boolean };
+      if (!out) break;
+      done = out.done;
+      setDbProgress(out.done / out.total);
+      // Yield to JS so the progress bar can repaint.
+      await sleep(0);
+      if (out.complete) break;
+    }
+    setDbProgress(1);
+    setLog((prev) => [
+      ...prev,
+      `120⁴ database populate complete (${total.toLocaleString()} games).`,
+    ]);
+    setEvaluatorBusy(false);
+    // Drop the progress bar after a brief pause.
+    setTimeout(() => setDbProgress(null), 800);
+    return true;
+  }
+
   async function onToggleEvaluator(useDb: boolean) {
     if (!game || evaluatorBusy) return;
     if (!useDb) {
@@ -357,59 +424,10 @@ const App = () => {
       refreshFromGame(game);
       return;
     }
-    // Switching ON: chunked populate with a progress bar. We pump batches
-    // of plays inside wasm and yield to the JS event loop between them so
-    // the percentage updates and the page stays responsive.
-    cancelDbPopulate.current = false;
-    setEvaluatorBusy(true);
-    setDbProgress(0);
-    setLog((prev) => [
-      ...prev,
-      'Starting 120⁴ database populate…',
-    ]);
-    // Defer one tick so React paints the 0% bar before wasm starts.
-    await sleep(0);
-    const total = (game as any).database_populate_begin?.() as number;
-    if (!total || total <= 0) {
-      setEvaluatorBusy(false);
-      setDbProgress(null);
-      setLog((prev) => [...prev, 'Database populate could not start.']);
-      return;
-    }
-    // Pick a batch size so we yield ~10 times per second on a typical run.
-    // Smaller = smoother bar, larger = less overhead. 200k feels right.
-    const BATCH = 200_000;
-    let done = 0;
-    while (done < total) {
-      if (cancelDbPopulate.current) {
-        // User toggled the checkbox back off while loading.
-        (game as any).set_evaluator?.('search');
-        setDbProgress(null);
-        setUseDatabaseEvaluator(false);
-        setEvaluatorBusy(false);
-        setLog((prev) => [...prev, 'Database populate cancelled.']);
-        return;
-      }
-      const out = (game as any).database_populate_step?.(BATCH) as
-        | null
-        | { done: number; total: number; complete: boolean };
-      if (!out) break;
-      done = out.done;
-      setDbProgress(out.done / out.total);
-      // Yield to JS so the progress bar can repaint.
-      await sleep(0);
-      if (out.complete) break;
-    }
+    const ok = await runChunkedPopulate(game, 'Starting 120⁴ database populate…');
+    if (!ok) return;
     setUseDatabaseEvaluator(true);
-    setDbProgress(1);
-    setLog((prev) => [
-      ...prev,
-      `120⁴ database populate complete (${total.toLocaleString()} games).`,
-    ]);
     refreshFromGame(game);
-    setEvaluatorBusy(false);
-    // Drop the progress bar after a brief pause.
-    setTimeout(() => setDbProgress(null), 800);
   }
 
   async function onRaise() {

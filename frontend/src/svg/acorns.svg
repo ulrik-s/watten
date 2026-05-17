@@ -1,3 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="brown">
-  <path d="M8 1c-2 0-3 1-3 2v1H3v2h10V4h-2V3c0-1-1-2-3-2zm-4 5v3c0 2.5 2 5 4 6 2-1 4-3.5 4-6V6H4z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" aria-label="Eichel">
+  <!-- Bavarian Eichel: brown acorn with a textured cap and tiny stem -->
+  <!-- stem at top, slightly curved -->
+  <path d="M16 5 Q 17 2.5 19.5 3.2" stroke="#3c2400" stroke-width="1.8"
+        fill="none" stroke-linecap="round"/>
+  <!-- cap (rounded rectangle with scallop along the bottom) -->
+  <path d="M5 9 Q 5 5.2 9 5.2 L 23 5.2 Q 27 5.2 27 9 L 27 13
+           Q 24 15 16 15 Q 8 15 5 13 Z"
+        fill="#5e3b0a" stroke="#33200a" stroke-width="0.6"/>
+  <!-- cap hatching (scale texture) -->
+  <g stroke="#33200a" stroke-width="0.55" opacity="0.7" fill="none">
+    <path d="M7 7 L 25 7"/>
+    <path d="M6.5 9.5 L 25.5 9.5"/>
+    <path d="M7 12 L 25 12"/>
+  </g>
+  <!-- acorn nut -->
+  <ellipse cx="16" cy="21" rx="9.5" ry="8" fill="#8a5414"
+           stroke="#4a2a06" stroke-width="0.6"/>
+  <!-- nut highlight -->
+  <ellipse cx="12" cy="18" rx="2.2" ry="3.2" fill="#bf8540" opacity="0.6"/>
+  <!-- nut tip -->
+  <ellipse cx="16" cy="28.5" rx="1.6" ry="0.9" fill="#4a2a06" opacity="0.55"/>
 </svg>

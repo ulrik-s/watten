@@ -1,3 +1,34 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="green">
-  <path d="M8 1c-3 2-5 5-5 7 0 3 2 5 5 7 3-2 5-4 5-7 0-2-2-5-5-7z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" aria-label="Grün (Laub)">
+  <!-- Bavarian Grün: lobed oak-leaf shape with a stem -->
+  <path d="M 16 3
+           Q 14 5 14 7
+           Q 10 6 9.2 9.2
+           Q 13 10 13 12
+           Q 9 12 8.2 15
+           Q 12 16 12 18
+           Q 8 18.2 8.2 21
+           Q 12 22 14 24
+           L 14 29
+           L 18 29
+           L 18 24
+           Q 20 22 23.8 21
+           Q 24 18.2 20 18
+           Q 24 16 23.8 15
+           Q 23 12 19 12
+           Q 19 10 22.8 9.2
+           Q 22 6 18 7
+           Q 18 5 16 3 Z"
+        fill="#0f7a2e" stroke="#054217" stroke-width="0.7"
+        stroke-linejoin="round"/>
+  <!-- central vein -->
+  <path d="M16 5 L 16 28" stroke="#054217" stroke-width="0.7" opacity="0.55"/>
+  <!-- side veins -->
+  <g stroke="#054217" stroke-width="0.45" opacity="0.45" fill="none">
+    <path d="M16 11 L 11 10"/>
+    <path d="M16 11 L 21 10"/>
+    <path d="M16 16 L 10 16"/>
+    <path d="M16 16 L 22 16"/>
+    <path d="M16 21 L 11 22"/>
+    <path d="M16 21 L 21 22"/>
+  </g>
 </svg>

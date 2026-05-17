@@ -1,4 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="gold">
-  <path d="M8 1c-2.5 0-4 2-4 5v3l-1 2h10l-1-2V6c0-3-1.5-5-4-5z"/>
-  <circle cx="8" cy="14" r="1" fill="gold"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" aria-label="Schelle">
+  <!-- Tyrolean Schelle: round hawk-bell with a horizontal slit and a small
+       top loop, gold on a darker rim -->
+  <!-- top loop -->
+  <circle cx="16" cy="4.5" r="2.2" fill="#e0a800" stroke="#6a4d00" stroke-width="0.7"/>
+  <circle cx="16" cy="4.5" r="0.9" fill="#3c2c00"/>
+  <!-- bell body -->
+  <circle cx="16" cy="18" r="11" fill="#f4c80a" stroke="#6a4d00" stroke-width="1"/>
+  <!-- horizontal slit -->
+  <rect x="6" y="17" width="20" height="2.6" fill="#6a4d00" rx="0.6"/>
+  <!-- two small dot details near the slit -->
+  <circle cx="9" cy="13" r="0.9" fill="#6a4d00"/>
+  <circle cx="23" cy="13" r="0.9" fill="#6a4d00"/>
+  <!-- highlight -->
+  <ellipse cx="11.5" cy="13.5" rx="2.4" ry="3.4" fill="#fde58a" opacity="0.75"/>
 </svg>
