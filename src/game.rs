@@ -849,6 +849,14 @@ impl GameState {
         (self.trick_lead + self.trick_pos) % 4
     }
 
+    /// Public accessor for the player whose turn it currently is. Same
+    /// value as the private `current_player()`; exposed so the WASM
+    /// bindings (and the "Show all hands" UI) can ask without taking a
+    /// move.
+    pub fn current_player_idx(&self) -> usize {
+        self.current_player()
+    }
+
     fn current_allowed(&self) -> Vec<usize> {
         let p = self.current_player();
         if self.trick_pos == 0 {
@@ -957,6 +965,61 @@ impl GameState {
         self.evaluate_moves(p, &allowed, &self.current_trick, self.tricks_won)
     }
 
+    /// Move evaluations for an arbitrary player from their current hand.
+    /// Used by the UI's "Show all hands" mode to display win-rate hints
+    /// for every player at the table, not just the human.
+    ///
+    /// Evaluations are restricted to the cards `p_idx` is *allowed* to
+    /// play right now: that's the full hand when they are leading or
+    /// when no trump has been led, and only their trump-suit cards when
+    /// a seeing player must follow a trump lead.
+    pub fn move_evaluations_for(&self, p_idx: usize) -> Vec<MoveEvaluation> {
+        if p_idx >= self.players.len() {
+            return Vec::new();
+        }
+        let hand_len = self.players[p_idx].hand.len();
+        // When it's actually p_idx's turn use the legal subset (so the
+        // displayed evals match what the bot is about to do); otherwise
+        // evaluate every card in hand so the user can browse "if it were
+        // your turn, this card would win N%".
+        let allowed: Vec<usize> = if self.current_player() == p_idx && self.playing_round {
+            self.current_allowed()
+        } else {
+            (0..hand_len).collect()
+        };
+        self.evaluate_moves(p_idx, &allowed, &self.current_trick, self.tricks_won)
+    }
+
+    /// Play exactly one bot move and return the recorded step (or an
+    /// empty Vec if it isn't a bot's turn). The "Step mode" UI calls this
+    /// once per Play-button press so the user can see the win-rate panel
+    /// for each bot before its card lands on the table.
+    pub fn advance_one_bot(&mut self) -> (Option<GameResult>, Vec<RoundStep>) {
+        let mut log = Vec::new();
+        if !self.playing_round {
+            return (None, log);
+        }
+        let p = self.current_player();
+        if self.players[p].human {
+            return (None, log);
+        }
+        let allowed = self.current_allowed();
+        let trick = self.current_trick.clone();
+        let tricks_won = self.tricks_won;
+        let idx = self.best_card_index_with_trick(p, &allowed, &trick, tricks_won);
+        self.play_internal(p, idx, &mut log);
+        let result = if !self.playing_round {
+            Some(if self.tricks_won[0] > self.tricks_won[1] {
+                GameResult::Team1Win
+            } else {
+                GameResult::Team2Win
+            })
+        } else {
+            None
+        };
+        (result, log)
+    }
+
     pub fn human_play(&mut self, idx: usize) -> (Option<GameResult>, Vec<RoundStep>) {
         let mut log = Vec::new();
         let p = self.current_player();
@@ -976,6 +1039,28 @@ impl GameState {
             );
         }
         (None, log)
+    }
+
+    /// Like [`Self::human_play`] but stops as soon as the next player is
+    /// a bot — the caller is expected to step the bots manually via
+    /// [`Self::advance_one_bot`]. Used by the UI's Step mode.
+    pub fn human_play_no_advance(
+        &mut self,
+        idx: usize,
+    ) -> (Option<GameResult>, Vec<RoundStep>) {
+        let mut log = Vec::new();
+        let p = self.current_player();
+        self.play_internal(p, idx, &mut log);
+        let result = if !self.playing_round {
+            Some(if self.tricks_won[0] > self.tricks_won[1] {
+                GameResult::Team1Win
+            } else {
+                GameResult::Team2Win
+            })
+        } else {
+            None
+        };
+        (result, log)
     }
 }
 

@@ -91,6 +91,47 @@ const App = () => {
   // `null` while the trick is still being played out.
   const [trickWinnerPos, setTrickWinnerPos] = useState<number | null>(null);
   const [rechte, setRechte] = useState<JsCard | null>(null);
+  // "Show all hands" reveals every player's cards face-up alongside their
+  // win-rate hints, so the user can see why each bot picks what it picks.
+  // Persisted in localStorage so it survives reloads.
+  const [showAllHands, setShowAllHands] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('watten.showAllHands') === '1';
+  });
+  // Step mode pauses between bot turns so the user has time to read the
+  // win-rate panel. A "Play" button advances one bot card per click.
+  const [stepMode, setStepMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('watten.stepMode') === '1';
+  });
+  // Every player's hand contents (kept in sync via refreshFromGame). Used
+  // for the face-up rendering when `showAllHands` is on. Always populated
+  // so toggling the checkbox doesn't require a wasm round-trip.
+  const [allHands, setAllHands] = useState<JsCard[][]>(() => [[], [], [], []]);
+  // Per-player win-rate hints, keyed by hand index. Populated for every
+  // player in show-all-hands mode; otherwise only for the human.
+  const [evalsByPlayer, setEvalsByPlayer] = useState<Map<number, MoveEval>[]>(
+    () => [new Map(), new Map(), new Map(), new Map()]
+  );
+  // Whose turn it is right now (0..3). `null` while the round is between
+  // states (after a play but before the next current_player resolves).
+  const [currentPlayer, setCurrentPlayer] = useState<number | null>(null);
+  // True iff step mode is on AND a bot is queued up: the UI shows the
+  // "Play" button and waits for the user instead of animating the next
+  // card automatically.
+  const [awaitingPlay, setAwaitingPlay] = useState(false);
+  const stepModeRef = useRef(stepMode);
+  useEffect(() => {
+    stepModeRef.current = stepMode;
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('watten.stepMode', stepMode ? '1' : '0');
+    }
+  }, [stepMode]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('watten.showAllHands', showAllHands ? '1' : '0');
+    }
+  }, [showAllHands]);
 
   // Authoritative trick state used by the animation loop.
   const trickRef = useRef<TrickEntry[]>([]);
@@ -113,6 +154,11 @@ const App = () => {
   useEffect(() => {
     init().then(() => {
       const g = new WasmGame(1);
+      // Debug convenience: expose the WasmGame on window so it can be
+      // poked at from the browser devtools console (e.g. to call
+      // `__watten_g.move_evaluations_for(2)` while staring at the
+      // rendered hand).
+      (window as any).__watten_g = g;
       setWinningPoints((g as any).winning_points?.() ?? 13);
       setRaiseLockoutScore((g as any).raise_lockout_score?.() ?? 10);
       g.start_round_interactive();
@@ -132,11 +178,29 @@ const App = () => {
       slotsRef.current = padSlots(orig);
       setSlots([...slotsRef.current]);
       // Bots advance to the human's first move; animate their plays in.
-      const [, steps] = g.advance_bots() as [number | null, JsRoundStep[]];
-      void processStepsAnimated(steps).then(() => refreshFromGame(g));
+      // In step mode we stop here and wait for the user to press Play.
+      if (stepModeRef.current) {
+        refreshFromGame(g);
+        maybeArmAwaitingPlay(g);
+      } else {
+        const [, steps] = g.advance_bots() as [number | null, JsRoundStep[]];
+        void processStepsAnimated(steps).then(() => refreshFromGame(g));
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Set or clear `awaitingPlay` based on whose turn it is right now. In
+  // step mode the UI parks here whenever a bot is up next so the user
+  // can read the win-rate panel before clicking Play.
+  function maybeArmAwaitingPlay(g: WasmGame) {
+    if (!stepModeRef.current) {
+      setAwaitingPlay(false);
+      return;
+    }
+    const isBot = (g as any).current_is_bot?.() as boolean | undefined;
+    setAwaitingPlay(!!isBot);
+  }
 
   function padSlots(hand: JsCard[]): (JsCard | null)[] {
     const out: (JsCard | null)[] = Array(CARDS_PER_HAND).fill(null);
@@ -161,8 +225,15 @@ const App = () => {
 
   function refreshFromGame(g: WasmGame) {
     const currentHand = g.hand(0) as JsCard[];
-    const currentAllowed = g.human_allowed_indices() as number[];
-    const evs = g.human_move_evaluations() as MoveEval[];
+    // `human_allowed_indices()` and `human_move_evaluations()` actually
+    // return data for whichever player is on the move — so the values
+    // are only meaningful for the human's hand when it really is the
+    // human's turn. Otherwise we'd be painting bot rates onto the
+    // player's own cards.
+    const cp = (g as any).current_player?.() as number | null | undefined;
+    const isHumanTurn = cp === 0;
+    const currentAllowed = isHumanTurn ? (g.human_allowed_indices() as number[]) : [];
+    const evs = isHumanTurn ? (g.human_move_evaluations() as MoveEval[]) : [];
 
     // Map each card in the current hand back to its slot via card identity.
     const allowedSet = new Set<number>();
@@ -182,6 +253,28 @@ const App = () => {
     setScores(g.scores() as unknown as [number, number]);
     setRoundPoints((g as any).round_points?.() ?? 2);
     refreshTricksThisRound(g);
+
+    // Pull every player's hand + evals so the "Show all hands" panel
+    // (and the step-mode Play button) always have fresh data. The wasm
+    // calls are cheap — each one is a few hundred microseconds against
+    // the search evaluator and microseconds against the populated DB.
+    const hands: JsCard[][] = [[], [], [], []];
+    const evalMaps: Map<number, MoveEval>[] = [
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map(),
+    ];
+    for (let p = 0; p < NUM_PLAYERS; p++) {
+      hands[p] = g.hand(p) as JsCard[];
+      const pe = (g as any).move_evaluations_for?.(p) as MoveEval[] | undefined;
+      if (pe) {
+        for (const e of pe) evalMaps[p].set(e.hand_idx, e);
+      }
+    }
+    setAllHands(hands);
+    setEvalsByPlayer(evalMaps);
+    setCurrentPlayer(cp === null || cp === undefined ? null : (cp as number));
   }
 
   async function processStepsAnimated(steps: JsRoundStep[]) {
@@ -258,22 +351,48 @@ const App = () => {
     setAllowedSlots(new Set());
     setEvalBySlot(new Map());
 
-    // Drive the actual play through wasm, then animate every returned step
-    // (human + bots) uniformly so the trick-winner highlight always fires.
-    // NOTE: serde-wasm-bindgen serializes Rust `None` as JS `undefined`, NOT
-    // `null`, so use `typeof === 'number'` to detect a real round-end result.
-    const [res, steps] = game.human_play(currentIdx) as [
-      number | undefined,
-      JsRoundStep[]
-    ];
+    // Drive the actual play through wasm. In step mode we stop right
+    // after the human's card so the user has to press Play to advance
+    // each bot; in auto mode `human_play` chains the full bot turn for
+    // us. NOTE: serde-wasm-bindgen serializes Rust `None` as JS
+    // `undefined`, not `null`, so use `typeof === 'number'`.
+    const [res, steps] = (stepModeRef.current
+      ? (game as any).human_play_no_advance(currentIdx)
+      : game.human_play(currentIdx)) as [number | undefined, JsRoundStep[]];
     await processStepsAnimated(steps);
 
     if (typeof res === 'number') {
       await handleRoundEnded(game);
     } else {
       refreshFromGame(game);
+      maybeArmAwaitingPlay(game);
       setBusy(false);
     }
+  }
+
+  // Step mode: play exactly one bot card and animate it. The Play button
+  // calls this. We loop until either the next player is the human or the
+  // round ends — but we re-check `stepModeRef` on each iteration so
+  // toggling the checkbox off mid-trick falls back to auto-advance.
+  async function onPlayNext() {
+    if (!game || busy || gameOver) return;
+    if (!awaitingPlay) return;
+    setBusy(true);
+    setAwaitingPlay(false);
+    const out = (game as any).advance_one_bot?.() as [number | undefined, JsRoundStep[]] | undefined;
+    if (!out) {
+      setBusy(false);
+      return;
+    }
+    const [res, steps] = out;
+    await processStepsAnimated(steps);
+    if (typeof res === 'number') {
+      await handleRoundEnded(game);
+      return;
+    }
+    refreshFromGame(game);
+    maybeArmAwaitingPlay(game);
+    setBusy(false);
   }
 
   async function handleRoundEnded(g: WasmGame) {
@@ -335,6 +454,13 @@ const App = () => {
         setBusy(false);
         return;
       }
+    }
+    if (stepModeRef.current) {
+      // Step mode: wait for the user to press Play before any bot moves.
+      refreshFromGame(g);
+      maybeArmAwaitingPlay(g);
+      setBusy(false);
+      return;
     }
     const [, st] = g.advance_bots() as [number | null, JsRoundStep[]];
     await processStepsAnimated(st);
@@ -517,18 +643,49 @@ const App = () => {
   function renderOpponent(playerIdx: number, size: number, gridArea: string) {
     const team = playerIdx % 2; // 0 = Team 1 (P1+P3), 1 = Team 2 (P2+P4)
     const relation = team === 0 ? 'teammate' : 'opponent';
+    const hand = allHands[playerIdx] ?? [];
+    const evals = evalsByPlayer[playerIdx] ?? new Map();
+    const isCurrent = currentPlayer === playerIdx;
     return (
-      <div className={`player ${gridArea} team-${team + 1} ${relation}`}>
+      <div
+        className={`player ${gridArea} team-${team + 1} ${relation}${
+          isCurrent ? ' current-turn' : ''
+        }${showAllHands ? ' revealed' : ''}`}
+      >
         <div className="player-label">
           P{playerIdx + 1}
           <span className="player-team-tag">{team === 0 ? 'T1' : 'T2'}</span>
+          {isCurrent ? <span className="current-turn-dot" aria-hidden="true">●</span> : null}
         </div>
         <div className="player-cards">
-          {Array.from({ length: CARDS_PER_HAND }).map((_, i) => (
-            <div key={i} className="opp-slot">
-              {i < size ? <CardView suit="Hearts" rank="" faceDown /> : null}
-            </div>
-          ))}
+          {Array.from({ length: CARDS_PER_HAND }).map((_, i) => {
+            // Face-down rendering (default): a single placeholder back per
+            // remaining card. Face-up rendering (Show all hands): pull the
+            // card from `hand[i]` and overlay the win-rate hint.
+            if (!showAllHands) {
+              return (
+                <div key={i} className="opp-slot">
+                  {i < size ? <CardView suit="Hearts" rank="" faceDown /> : null}
+                </div>
+              );
+            }
+            const c = hand[i];
+            if (!c) {
+              return <div key={i} className="opp-slot revealed" />;
+            }
+            // Win rates are only meaningful for the player about to
+            // move — the search evaluator scores from their position.
+            // Show the percentage only on the current player's hand; the
+            // others get face-up cards with no number.
+            const e = isCurrent ? evals.get(i) : undefined;
+            const rate = e ? Math.round(e.rate * 100) : null;
+            return (
+              <div key={i} className="opp-slot revealed">
+                <CardView suit={c.suit} rank={displayRank(c.rank)} />
+                <div className="card-rate">{rate !== null ? `${rate}%` : ''}</div>
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -573,6 +730,26 @@ const App = () => {
           data-testid="show-debug"
         />
         Show scores
+      </label>
+      &nbsp;&nbsp;
+      <label className="debug-toggle">
+        <input
+          type="checkbox"
+          checked={showAllHands}
+          onChange={(e) => setShowAllHands(e.target.checked)}
+          data-testid="show-all-hands"
+        />
+        Show all hands
+      </label>
+      &nbsp;&nbsp;
+      <label className="debug-toggle">
+        <input
+          type="checkbox"
+          checked={stepMode}
+          onChange={(e) => setStepMode(e.target.checked)}
+          data-testid="step-mode"
+        />
+        Step mode (Play button between bot turns)
       </label>
       &nbsp;&nbsp;
       <label className="debug-toggle">
@@ -634,6 +811,20 @@ const App = () => {
         >
           Concede round
         </button>
+        {stepMode && (
+          <button
+            onClick={onPlayNext}
+            disabled={!game || busy || !!gameOver || !awaitingPlay}
+            data-testid="play-next"
+            title={
+              !awaitingPlay
+                ? 'Waiting for your card click'
+                : `Play P${(currentPlayer ?? 0) + 1}'s next card`
+            }
+          >
+            ▶ Play {currentPlayer !== null ? `(P${currentPlayer + 1})` : ''}
+          </button>
+        )}
       </div>
       {decidedFor !== null && (
         <p className="round-decided" data-testid="round-decided">

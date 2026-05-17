@@ -213,6 +213,50 @@ h1 {
   height: 64px;
 }
 
+/* "Show all hands" mode reveals opponents' cards face-up at the same
+   size as the human's hand, with their win-rate hint underneath. */
+.opp-slot.revealed {
+  width: 38px;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.opp-slot.revealed .card {
+  width: 38px;
+  height: 56px;
+  font-size: 9px;
+}
+.opp-slot.revealed .card .suit {
+  width: 18px;
+  height: 18px;
+}
+.opp-slot.revealed .card-rate {
+  font-size: 10px;
+  opacity: 0.85;
+  min-height: 12px;
+}
+
+/* Highlight the player whose turn it is — helps users follow the
+   step-mode flow. */
+.player.current-turn .player-label {
+  background: rgba(255, 224, 102, 0.18);
+  border: 1px solid rgba(255, 224, 102, 0.5);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.current-turn-dot {
+  color: #ffe066;
+  margin-left: 4px;
+  font-size: 14px;
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
 /* Trick area: always 4 slots wide so the center never resizes. */
 .table .center {
   display: grid;

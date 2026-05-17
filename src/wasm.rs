@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen as swb;
 use wasm_bindgen::prelude::*;
 
-use crate::game::{Evaluator, GameState, RaiseOutcome, RoundStep};
+use crate::game::{Evaluator, GameState, MoveEvaluation, RaiseOutcome, RoundStep};
 use crate::{Card, Rank, Suit};
 
 /// Convert a [`RaiseOutcome`] (or `Err`) into the JSON shape consumed by
@@ -87,6 +87,30 @@ impl From<RoundStep> for JsRoundStep {
 /// Map a Vec of native [`RoundStep`] into the JS-facing shape.
 fn to_js_steps(steps: Vec<RoundStep>) -> Vec<JsRoundStep> {
     steps.into_iter().map(JsRoundStep::from).collect()
+}
+
+/// Map a Vec of [`MoveEvaluation`] into the `[{hand_idx, wins, total,
+/// illegal, rate}]` shape consumed by the UI.
+fn evals_to_js(evals: Vec<MoveEvaluation>) -> JsValue {
+    #[derive(Serialize)]
+    struct JsEval {
+        hand_idx: usize,
+        wins: u32,
+        total: u32,
+        illegal: u32,
+        rate: f64,
+    }
+    let out: Vec<JsEval> = evals
+        .into_iter()
+        .map(|e| JsEval {
+            hand_idx: e.hand_idx,
+            wins: e.wins,
+            total: e.total,
+            illegal: e.illegal,
+            rate: e.rate(),
+        })
+        .collect();
+    swb::to_value(&out).unwrap()
 }
 
 #[wasm_bindgen]
@@ -294,27 +318,51 @@ impl WasmGame {
     /// whose turn it is. `total = wins + losses` (legal completions);
     /// `illegal` is non-zero only under the Database evaluator.
     pub fn human_move_evaluations(&self) -> JsValue {
-        #[derive(Serialize)]
-        struct JsEval {
-            hand_idx: usize,
-            wins: u32,
-            total: u32,
-            illegal: u32,
-            rate: f64,
+        evals_to_js(self.inner.human_move_evaluations())
+    }
+
+    /// Move evaluations for an arbitrary player. The UI's "Show all hands"
+    /// mode uses this to display win-rate hints for every bot at the
+    /// table, not just the human. Same shape as
+    /// [`Self::human_move_evaluations`].
+    pub fn move_evaluations_for(&self, p_idx: usize) -> JsValue {
+        evals_to_js(self.inner.move_evaluations_for(p_idx))
+    }
+
+    /// Index (0..4) of the player whose turn it currently is, or `null`
+    /// if the round isn't in progress. Used by the UI to know which
+    /// opponent to spotlight in step mode.
+    pub fn current_player(&self) -> JsValue {
+        if !self.inner.playing_round {
+            return JsValue::NULL;
         }
-        let evals: Vec<JsEval> = self
-            .inner
-            .human_move_evaluations()
-            .into_iter()
-            .map(|e| JsEval {
-                hand_idx: e.hand_idx,
-                wins: e.wins,
-                total: e.total,
-                illegal: e.illegal,
-                rate: e.rate(),
-            })
-            .collect();
-        swb::to_value(&evals).unwrap()
+        JsValue::from(self.inner.current_player_idx() as u32)
+    }
+
+    /// True iff the player whose turn it is is a bot. Lets the UI decide
+    /// whether to show the "Play next" button (step mode) or wait for a
+    /// hand-card click.
+    pub fn current_is_bot(&self) -> bool {
+        if !self.inner.playing_round {
+            return false;
+        }
+        let p = self.inner.current_player_idx();
+        !self.inner.players[p].human
+    }
+
+    /// Play exactly one bot's card and return `[result, steps]`. Returns
+    /// an empty step list when it's not a bot's turn.
+    pub fn advance_one_bot(&mut self) -> JsValue {
+        let (res, steps) = self.inner.advance_one_bot();
+        swb::to_value(&(res.map(|r| r as u8), to_js_steps(steps))).unwrap()
+    }
+
+    /// Like [`Self::human_play`] but does *not* auto-advance the bots
+    /// afterwards — the caller is expected to step the bots manually via
+    /// [`Self::advance_one_bot`]. Used by the UI's Step mode.
+    pub fn human_play_no_advance(&mut self, idx: usize) -> JsValue {
+        let (res, steps) = self.inner.human_play_no_advance(idx);
+        swb::to_value(&(res.map(|r| r as u8), to_js_steps(steps))).unwrap()
     }
 
     /// `"search"` (default, fast) or `"database"` (legacy brute-force 120^4).
