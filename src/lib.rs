@@ -117,26 +117,54 @@ pub fn perm_prefix_range(prefix: &[usize]) -> (usize, usize) {
     (index, index + len)
 }
 
-/// Generate all permutations of indices `[0,1,2,3,4]`
+/// Generate all permutations of indices `[0,1,2,3,4]` **in
+/// lexicographic order**.
+///
+/// CRITICAL invariant for the 120⁴ database: `all_hand_orders()[i]` is
+/// the permutation whose [`perm_index`] is `i`, and consequently
+/// `perm_prefix_range(prefix)` returns `[s, e)` such that exactly
+/// `all_hand_orders()[s..e]` are the permutations starting with
+/// `prefix`. The database evaluator relies on this to map "the cards
+/// already played by player p" into a contiguous slice of permutation
+/// indices that select rows in the populated array.
+///
+/// Heap's algorithm — which the previous implementation used — scatters
+/// permutations starting with `k` across the 120 outputs, which makes
+/// `perm_prefix_range`'s contiguous range refer to the wrong subset of
+/// database rows and corrupts every win/loss tally.
 pub fn all_hand_orders() -> Vec<[usize; 5]> {
-    fn permute(result: &mut Vec<[usize; 5]>, arr: &mut [usize], n: usize) {
-        if n == 1 {
-            result.push([arr[0], arr[1], arr[2], arr[3], arr[4]]);
-        } else {
-            for i in 0..n {
-                permute(result, arr, n - 1);
-                if n % 2 == 0 {
-                    arr.swap(i, n - 1);
-                } else {
-                    arr.swap(0, n - 1);
-                }
-            }
-        }
-    }
-    let mut data = [0, 1, 2, 3, 4];
     let mut result = Vec::with_capacity(HAND_PERMUTATIONS);
-    permute(&mut result, &mut data, 5);
+    let mut arr: [usize; 5] = [0, 1, 2, 3, 4];
+    result.push(arr);
+    while next_lex_permutation(&mut arr) {
+        result.push(arr);
+    }
+    debug_assert_eq!(result.len(), HAND_PERMUTATIONS);
     result
+}
+
+/// Mutate `arr` into the lexicographically-next permutation of its
+/// elements. Returns `false` (and leaves `arr` reversed) once the
+/// strictly-descending permutation is hit. Standard algorithm — same
+/// idea as `std::next_permutation` in C++.
+fn next_lex_permutation(arr: &mut [usize; 5]) -> bool {
+    // Find largest `i` such that arr[i-1] < arr[i].
+    let n = arr.len();
+    let mut i = n - 1;
+    while i > 0 && arr[i - 1] >= arr[i] {
+        i -= 1;
+    }
+    if i == 0 {
+        return false;
+    }
+    // Find largest `j` such that arr[j] > arr[i-1].
+    let mut j = n - 1;
+    while arr[j] <= arr[i - 1] {
+        j -= 1;
+    }
+    arr.swap(i - 1, j);
+    arr[i..].reverse();
+    true
 }
 
 /// Compute the lexicographic index of a permutation of `[0,1,2,3,4]`
