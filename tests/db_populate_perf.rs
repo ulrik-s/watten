@@ -8,7 +8,7 @@
 use watten::game::{Evaluator, GameState};
 
 #[test]
-#[ignore]
+#[ignore = "heavy 120^4 populate benchmark; run explicitly with --ignored"]
 fn full_database_populate_release_perf() {
     let mut g = GameState::new(0);
     g.start_round_interactive();

@@ -6,7 +6,7 @@ use watten::HAND_PERMUTATIONS;
 /// and then with the full range produces evaluations for both ends of the
 /// permutation index space.
 #[test]
-#[ignore]
+#[ignore = "heavy full 120^4 database build; run explicitly with --ignored"]
 fn full_database_population_after_clear() {
     let mut g = GameState::new(0);
     g.set_evaluator(Evaluator::Database);

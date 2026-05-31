@@ -57,11 +57,10 @@ fn legal_follow_mask(
     // player must play a trump-suit card if they hold one.
     if lead_card.suit == rechte.suit && is_seeing(player, dealer) {
         let mut subset = 0u8;
-        for i in 0..TRICKS_PER_ROUND {
+        for (i, &c) in orig_hands[player as usize].iter().enumerate() {
             if remaining_mask & (1 << i) == 0 {
                 continue;
             }
-            let c = orig_hands[player as usize][i];
             if c.suit == rechte.suit {
                 subset |= 1 << i;
             }
@@ -183,7 +182,7 @@ pub fn count_completions(
                         rechte: pos.rechte,
                     };
                     let sub = count_completions(&next, memo);
-                    if winner % 2 == 0 {
+                    if winner.is_multiple_of(2) {
                         for t in 0..TRICKS_PER_ROUND {
                             result[t + 1] = result[t + 1].saturating_add(sub[t]);
                         }
@@ -299,7 +298,7 @@ fn enumerate_partial_trick(
             rechte: pos.rechte,
         };
         let sub = count_completions(&next, memo);
-        if winner % 2 == 0 {
+        if winner.is_multiple_of(2) {
             for t in 0..TRICKS_PER_ROUND {
                 out[t + 1] = out[t + 1].saturating_add(sub[t]);
             }
