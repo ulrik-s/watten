@@ -418,34 +418,16 @@ test.describe('widgets', () => {
     await expect(p4).toContainText('T2');
   });
 
-  test('120^4 database toggle is rendered and shows a progress bar when clicked', async ({
+  test('120^4 database is the only evaluator — the toggle was removed', async ({
     page,
   }) => {
     test.setTimeout(60000);
+    // Reaching a selectable card proves the automatic per-deal 120⁴
+    // populate completed and the bots advanced to the human's turn.
     await waitForReady(page);
-    const dbToggle = page.getByTestId('toggle-db-evaluator');
-    await expect(dbToggle).toBeVisible();
-    await expect(dbToggle).not.toBeChecked();
-    await expect(dbToggle).toBeEnabled();
-    const label = page.locator('label', { has: dbToggle });
-    await expect(label).toContainText(/database/i);
-    // Kick off the populate. We don't wait for it to complete — the goal
-    // is to verify the progress bar appears and the % advances.
-    void dbToggle.click({ force: true });
-    const bar = page.getByTestId('db-progress');
-    await expect(bar).toBeVisible({ timeout: 10000 });
-    // Read the percentage twice and assert it moved forward.
-    const readPercent = async () => {
-      const txt = await bar.innerText();
-      const m = txt.match(/(\d+)%/);
-      return m ? parseInt(m[1], 10) : 0;
-    };
-    const first = await readPercent();
-    await page.waitForTimeout(800);
-    const second = await readPercent();
-    expect(second).toBeGreaterThanOrEqual(first);
-    // At least *some* progress should have been made.
-    expect(Math.max(first, second)).toBeGreaterThan(0);
+    // The evaluator toggle is gone — there is no longer a search-vs-database
+    // choice; the 120⁴ database runs automatically at every deal.
+    await expect(page.getByTestId('toggle-db-evaluator')).toHaveCount(0);
   });
 
   test('Show-scores debug toggle reveals round/trick scores per card', async ({

@@ -65,11 +65,10 @@ const App = () => {
     0, 0,
   ]);
   const [showDebug, setShowDebug] = useState(false);
-  const [useDatabaseEvaluator, setUseDatabaseEvaluator] = useState(false);
-  const [evaluatorBusy, setEvaluatorBusy] = useState(false);
-  // 0..1 progress for the database populate, or null when idle.
+  // 0..1 progress for the 120⁴ database populate, or null when idle. The
+  // database is the only evaluator now, so the populate runs automatically
+  // at every deal rather than behind a toggle.
   const [dbProgress, setDbProgress] = useState<number | null>(null);
-  const cancelDbPopulate = useRef(false);
   const [trump, setTrump] = useState<string | null>(null);
   const [striker, setStriker] = useState<string | null>(null);
   const [roundPoints, setRoundPoints] = useState(2);
@@ -159,8 +158,15 @@ const App = () => {
   }, [log]);
 
   useEffect(() => {
-    void init().then(() => {
+    void init().then(async () => {
       const g: TypedWasmGame = new WasmGame(1);
+      // The full 120⁴ populate is too slow to run on every deal in the
+      // E2E suite, so `?fast=1` restricts it to a single permutation —
+      // the wasm layer exposes this precisely for tests. Real users get
+      // the full range.
+      if (FAST_MODE) {
+        g.set_perm_range_single(0);
+      }
       // Debug convenience: expose the WasmGame on window so it can be
       // poked at from the browser devtools console (e.g. to call
       // `__watten_g.move_evaluations_for(2)` while staring at the
@@ -182,6 +188,8 @@ const App = () => {
       const orig = g.hand(0);
       slotsRef.current = padSlots(orig);
       setSlots([...slotsRef.current]);
+      // Build the 120⁴ database for this deal before anyone plays.
+      await runChunkedPopulate(g, 'Populating 120⁴ database…');
       // Bots advance to the human's first move; animate their plays in.
       // In step mode we stop here and wait for the user to press Play.
       if (stepModeRef.current) {
@@ -189,7 +197,8 @@ const App = () => {
         maybeArmAwaitingPlay(g);
       } else {
         const [, steps] = g.advance_bots();
-        void processStepsAnimated(steps).then(() => refreshFromGame(g));
+        await processStepsAnimated(steps);
+        refreshFromGame(g);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -451,16 +460,10 @@ const App = () => {
     // so the previous round's entries are meaningless for this deal.
     // Re-run the chunked populate before letting the bots play, otherwise
     // they would query an empty DB and fall back to "first legal card".
-    if (useDatabaseEvaluator) {
-      const ok = await runChunkedPopulate(
-        g,
-        `Re-populating 120⁴ database for round ${nextRound}…`
-      );
-      if (!ok) {
-        setBusy(false);
-        return;
-      }
-    }
+    await runChunkedPopulate(
+      g,
+      `Re-populating 120⁴ database for round ${nextRound}…`
+    );
     if (stepModeRef.current) {
       // Step mode: wait for the user to press Play before any bot moves.
       refreshFromGame(g);
@@ -474,41 +477,27 @@ const App = () => {
     setBusy(false);
   }
 
-  // Pump the chunked 120⁴ populate for the current deal. Returns true on
-  // completion, false if the user cancelled (toggled the checkbox off).
-  // Shared by `onToggleEvaluator` (initial activation) and
-  // `handleRoundEnded` (re-populate at every new deal — the indices are
-  // per-deal so the previous round's DB doesn't transfer).
-  async function runChunkedPopulate(
-    g: TypedWasmGame,
-    label: string
-  ): Promise<boolean> {
-    cancelDbPopulate.current = false;
-    setEvaluatorBusy(true);
+  // Pump the chunked 120⁴ populate for the current deal, driving the
+  // progress bar. Called automatically at every deal — the 120⁴ database
+  // is the only evaluator. The indices are per-deal so the previous
+  // round's DB doesn't transfer; until the populate completes the engine
+  // falls back to the search evaluator internally.
+  async function runChunkedPopulate(g: TypedWasmGame, label: string) {
     setDbProgress(0);
     setLog((prev) => [...prev, label]);
     // Defer one tick so React paints the 0% bar before wasm starts.
     await sleep(0);
     const total = g.database_populate_begin();
     if (!total || total <= 0) {
-      setEvaluatorBusy(false);
       setDbProgress(null);
       setLog((prev) => [...prev, 'Database populate could not start.']);
-      return false;
+      return;
     }
     // Pick a batch size so we yield ~10 times per second on a typical run.
     // Smaller = smoother bar, larger = less overhead. 200k feels right.
     const BATCH = 200_000;
     let done = 0;
     while (done < total) {
-      if (cancelDbPopulate.current) {
-        g.set_evaluator('search');
-        setDbProgress(null);
-        setUseDatabaseEvaluator(false);
-        setEvaluatorBusy(false);
-        setLog((prev) => [...prev, 'Database populate cancelled.']);
-        return false;
-      }
       const out = g.database_populate_step(BATCH);
       if (!out) break;
       done = out.done;
@@ -522,30 +511,8 @@ const App = () => {
       ...prev,
       `120⁴ database populate complete (${total.toLocaleString()} games).`,
     ]);
-    setEvaluatorBusy(false);
     // Drop the progress bar after a brief pause.
     setTimeout(() => setDbProgress(null), 800);
-    return true;
-  }
-
-  async function onToggleEvaluator(useDb: boolean) {
-    if (!game || evaluatorBusy) return;
-    if (!useDb) {
-      // Switching back to search is instant.
-      game.set_evaluator('search');
-      setUseDatabaseEvaluator(false);
-      setDbProgress(null);
-      setLog((prev) => [...prev, 'Switched to fast search evaluator.']);
-      refreshFromGame(game);
-      return;
-    }
-    const ok = await runChunkedPopulate(
-      game,
-      'Starting 120⁴ database populate…'
-    );
-    if (!ok) return;
-    setUseDatabaseEvaluator(true);
-    refreshFromGame(game);
   }
 
   async function onRaise() {
@@ -745,17 +712,6 @@ const App = () => {
           data-testid="step-mode"
         />
         Step mode (Play button between bot turns)
-      </label>
-      &nbsp;&nbsp;
-      <label className="debug-toggle">
-        <input
-          type="checkbox"
-          checked={useDatabaseEvaluator || evaluatorBusy}
-          disabled={!game || evaluatorBusy}
-          onChange={(e) => onToggleEvaluator(e.target.checked)}
-          data-testid="toggle-db-evaluator"
-        />
-        Use full 120<sup>4</sup> database (slow)
       </label>
       {dbProgress !== null && (
         <div className="db-progress" data-testid="db-progress">
