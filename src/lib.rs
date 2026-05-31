@@ -101,14 +101,8 @@ pub fn perm_prefix_range(prefix: &[usize]) -> (usize, usize) {
     assert!(prefix.len() <= 5, "prefix too long");
     let mut index = 0;
     let mut used = [false; 5];
-    for i in 0..prefix.len() {
-        let v = prefix[i];
-        let mut smaller = 0;
-        for j in 0..v {
-            if !used[j] {
-                smaller += 1;
-            }
-        }
+    for (i, &v) in prefix.iter().enumerate() {
+        let smaller = used[..v].iter().filter(|&&u| !u).count();
         used[v] = true;
         index += smaller * factorial(4 - i);
     }
@@ -171,14 +165,9 @@ fn next_lex_permutation(arr: &mut [usize; 5]) -> bool {
 pub fn perm_index(perm: &[usize; 5]) -> usize {
     let mut index = 0;
     let mut used = [false; 5];
-    for i in 0..5 {
-        let mut smaller = 0;
-        for j in 0..perm[i] {
-            if !used[j] {
-                smaller += 1;
-            }
-        }
-        used[perm[i]] = true;
+    for (i, &p) in perm.iter().enumerate() {
+        let smaller = used[..p].iter().filter(|&&u| !u).count();
+        used[p] = true;
         index += smaller * factorial(4 - i);
     }
     index

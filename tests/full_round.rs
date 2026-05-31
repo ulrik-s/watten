@@ -148,8 +148,8 @@ fn counting_points_after_rounds() {
     let mut g = GameState::new(0);
     g.dealer = 0;
     g.rechte = Some(rechte);
-    for i in 0..4 {
-        g.players[i].hand = original_hands[i].clone();
+    for (player, hand) in g.players.iter_mut().zip(&original_hands) {
+        player.hand = hand.clone();
     }
     let (_winners, tricks) = manual_round(&mut original_hands.clone(), g.dealer, rechte);
     let result = if tricks[0] > tricks[1] {

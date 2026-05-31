@@ -28,6 +28,8 @@ jobs:
           tool: cargo-llvm-cov
       - name: rustfmt
         run: cargo fmt -- --check
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
       - name: Tests + coverage (lcov)
         run: cargo llvm-cov --workspace --lcov --output-path coverage-rust.lcov
       - name: Tests + coverage (HTML)

@@ -28,11 +28,7 @@ fn full_database_population_after_clear() {
     let evs_full = g.evaluate_moves(p, &allowed, &[], [0, 0]);
     // Full population should give at least an order of magnitude more counts
     // per move than the single-permutation run.
-    let restricted_max = evs_restricted
-        .iter()
-        .map(|e| e.total)
-        .max()
-        .unwrap_or(0);
+    let restricted_max = evs_restricted.iter().map(|e| e.total).max().unwrap_or(0);
     let full_max = evs_full.iter().map(|e| e.total).max().unwrap_or(0);
     assert!(full_max > restricted_max);
 }

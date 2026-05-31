@@ -75,12 +75,8 @@ pub fn round_score(card: &Card, rechte: Card) -> i16 {
 /// Trick-level score for a card at `position` (0..4) inside `trick`. See
 /// the module docs for the model.
 pub fn trick_score(card: &Card, position: usize, trick: &[Card], rechte: Card) -> i16 {
-    if card.rank == rechte.rank {
-        for earlier in 0..position {
-            if trick[earlier].rank == rechte.rank {
-                return -400;
-            }
-        }
+    if card.rank == rechte.rank && trick[..position].iter().any(|c| c.rank == rechte.rank) {
+        return -400;
     }
     let lead_suit = trick[0].suit;
     let rv = rank_value(card.rank) as i16;

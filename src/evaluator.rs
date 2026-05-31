@@ -16,9 +16,7 @@ use std::cell::RefCell;
 
 use crate::database::{FlatGameDatabase, GameDatabase};
 use crate::game::{play_hand, MoveEvaluation, TRICKS_PER_ROUND};
-use crate::search::{
-    evaluate_moves as search_evaluate_moves, SearchMemo, SearchPosition,
-};
+use crate::search::{evaluate_moves as search_evaluate_moves, SearchMemo, SearchPosition};
 use crate::{all_hand_orders, perm_prefix_range, Card, GameResult};
 
 /// All the per-round/per-state context an evaluator needs to score moves.
@@ -163,18 +161,13 @@ impl MoveEvaluator for SearchEvaluator {
         evals
             .into_iter()
             .filter_map(|e| {
-                current_hand_idx_for_orig(
-                    ctx.orig_hands,
-                    ctx.player,
-                    e.orig_idx,
-                    ctx.current_hand,
-                )
-                .map(|hi| MoveEvaluation {
-                    hand_idx: hi,
-                    wins: e.wins,
-                    total: e.total,
-                    illegal: 0, // search only explores legal continuations
-                })
+                current_hand_idx_for_orig(ctx.orig_hands, ctx.player, e.orig_idx, ctx.current_hand)
+                    .map(|hi| MoveEvaluation {
+                        hand_idx: hi,
+                        wins: e.wins,
+                        total: e.total,
+                        illegal: 0, // search only explores legal continuations
+                    })
             })
             .collect()
     }
@@ -345,20 +338,20 @@ impl MoveEvaluator for DatabaseEvaluator {
         let mut out = Vec::with_capacity(ctx.allowed_orig_indices.len());
         for &orig in ctx.allowed_orig_indices {
             let mut lists: [Vec<usize>; 4] = std::array::from_fn(|_| Vec::new());
-            for i in 0..4 {
+            for (i, list) in lists.iter_mut().enumerate() {
                 let mut prefix = ctx.played[i].clone();
                 if i == ctx.player {
                     prefix.push(orig);
                 }
                 let (s, e) = perm_prefix_range(&prefix);
                 if let Some(ref allowed) = self.perm_range {
-                    lists[i] = allowed
+                    *list = allowed
                         .iter()
                         .cloned()
                         .filter(|&v| v >= s && v < e)
                         .collect();
                 } else {
-                    lists[i] = (s..e).collect();
+                    *list = (s..e).collect();
                 }
             }
             let counts = self
@@ -367,15 +360,12 @@ impl MoveEvaluator for DatabaseEvaluator {
             let wins = counts[win_result];
             let losses = counts[loss_result];
             let illegal = counts[GameResult::RuleViolation as usize];
-            let hi = match current_hand_idx_for_orig(
-                ctx.orig_hands,
-                ctx.player,
-                orig,
-                ctx.current_hand,
-            ) {
-                Some(i) => i,
-                None => continue,
-            };
+            let hi =
+                match current_hand_idx_for_orig(ctx.orig_hands, ctx.player, orig, ctx.current_hand)
+                {
+                    Some(i) => i,
+                    None => continue,
+                };
             out.push(MoveEvaluation {
                 hand_idx: hi,
                 wins,

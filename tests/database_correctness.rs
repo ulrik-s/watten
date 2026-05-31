@@ -71,12 +71,13 @@ fn perm_prefix_range_indexes_into_all_hand_orders_correctly() {
         assert_eq!(e - s, 24, "range size for prefix [{}]", first);
         // Every index inside the range must point to a permutation
         // whose first element is `first`.
-        for i in s..e {
+        for (offset, perm) in perms[s..e].iter().enumerate() {
+            let i = s + offset;
             assert_eq!(
-                perms[i][0], first,
+                perm[0], first,
                 "perms[{}] = {:?} should start with {}; \
                  perm_prefix_range([{}]) returned [{}, {})",
-                i, perms[i], first, first, s, e
+                i, perm, first, first, s, e
             );
         }
         // Conversely, every permutation that DOES start with `first`
@@ -87,7 +88,12 @@ fn perm_prefix_range_indexes_into_all_hand_orders_correctly() {
                     i >= s && i < e,
                     "perms[{}] = {:?} starts with {} but lies outside \
                      perm_prefix_range([{}]) = [{}, {})",
-                    i, p, first, first, s, e
+                    i,
+                    p,
+                    first,
+                    first,
+                    s,
+                    e
                 );
             }
         }
@@ -102,9 +108,9 @@ fn perm_prefix_range_two_element_prefix_indexes_correctly() {
     for &(a, b) in &[(0usize, 1usize), (2, 0), (4, 3), (1, 4)] {
         let (s, e) = perm_prefix_range(&[a, b]);
         assert_eq!(e - s, 6, "range size for prefix [{}, {}]", a, b);
-        for i in s..e {
-            assert_eq!(perms[i][0], a);
-            assert_eq!(perms[i][1], b);
+        for perm in &perms[s..e] {
+            assert_eq!(perm[0], a);
+            assert_eq!(perm[1], b);
         }
         for (i, p) in perms.iter().enumerate() {
             if p[0] == a && p[1] == b {
@@ -112,7 +118,10 @@ fn perm_prefix_range_two_element_prefix_indexes_correctly() {
                     i >= s && i < e,
                     "perms[{}] = {:?} starts with [{}, {}] but is outside \
                      perm_prefix_range result",
-                    i, p, a, b
+                    i,
+                    p,
+                    a,
+                    b
                 );
             }
         }

@@ -259,17 +259,16 @@ pub fn evaluate_moves(
 
         let mut wins = 0u32;
         let mut total = 0u32;
-        for t in 0..=TRICKS_PER_ROUND {
-            if completions[t] == 0 {
+        for (t, &count) in completions.iter().enumerate() {
+            if count == 0 {
                 continue;
             }
             let team1_round = team_tricks_so_far[0] as usize + t;
             let team2_round = TRICKS_PER_ROUND - team1_round;
-            total = total.saturating_add(completions[t]);
-            if (team == 0 && team1_round > team2_round)
-                || (team == 1 && team2_round > team1_round)
+            total = total.saturating_add(count);
+            if (team == 0 && team1_round > team2_round) || (team == 1 && team2_round > team1_round)
             {
-                wins = wins.saturating_add(completions[t]);
+                wins = wins.saturating_add(count);
             }
         }
         results.push(MoveEval {

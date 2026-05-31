@@ -64,10 +64,7 @@ pub enum RaiseOutcome {
     },
     /// The responding team folded; the proposing team won the round at
     /// `points` (the pre-raise round value). The round is over.
-    Folded {
-        winning_team: usize,
-        points: usize,
-    },
+    Folded { winning_team: usize, points: usize },
 }
 
 /// Placeholder card used to initialise fixed-size stack buffers before
@@ -148,10 +145,7 @@ fn simulate_game(
             // plays a non-trump card while still holding a trump-suit
             // card in their *remaining* hand, this permutation produces
             // an illegal game.
-            if lead_card.suit == rechte.suit
-                && is_seeing(idx)
-                && card.suit != rechte.suit
-            {
+            if lead_card.suit == rechte.suit && is_seeing(idx) && card.suit != rechte.suit {
                 let mut has_trump_remaining = false;
                 for p in pos[idx] + 1..TRICKS_PER_ROUND {
                     if hands[idx][perms[idx][p]].suit == rechte.suit {
@@ -254,8 +248,8 @@ impl GameState {
             Player::new(false),
             Player::new(false),
         ];
-        for i in 0..human_players.min(4) {
-            players[i].human = true;
+        for player in players.iter_mut().take(human_players.min(4)) {
+            player.human = true;
         }
         Self {
             players,
@@ -880,8 +874,7 @@ impl GameState {
                     let rates = self.win_rates_for_player_with_trick(lead, &played, tricks);
                     self.players[lead].play_card(&lead_allowed, Some(&rates))
                 } else {
-                    let idx =
-                        self.best_card_index_with_trick(lead, &lead_allowed, &played, tricks);
+                    let idx = self.best_card_index_with_trick(lead, &lead_allowed, &played, tricks);
                     self.players[lead].hand.remove(idx)
                 };
                 let orig = self.find_orig_index(lead, card);
@@ -903,8 +896,7 @@ impl GameState {
                     let rates = self.win_rates_for_player_with_trick(p_idx, &played, tricks);
                     self.players[p_idx].play_card(&allowed, Some(&rates))
                 } else {
-                    let idx =
-                        self.best_card_index_with_trick(p_idx, &allowed, &played, tricks);
+                    let idx = self.best_card_index_with_trick(p_idx, &allowed, &played, tricks);
                     self.players[p_idx].hand.remove(idx)
                 };
                 let orig = self.find_orig_index(p_idx, card);
@@ -984,7 +976,7 @@ impl GameState {
         }
     }
 
-    fn finish_trick(&mut self, _record: &mut Vec<RoundStep>) {
+    fn finish_trick(&mut self, _record: &mut [RoundStep]) {
         let rechte = self.rechte.unwrap();
         let trick_cards: Vec<Card> = self.current_trick.iter().map(|(_, c)| *c).collect();
         let winner_pos = trick_winner_position(&trick_cards, rechte);
@@ -1137,10 +1129,7 @@ impl GameState {
     /// Like [`Self::human_play`] but stops as soon as the next player is
     /// a bot — the caller is expected to step the bots manually via
     /// [`Self::advance_one_bot`]. Used by the UI's Step mode.
-    pub fn human_play_no_advance(
-        &mut self,
-        idx: usize,
-    ) -> (Option<GameResult>, Vec<RoundStep>) {
+    pub fn human_play_no_advance(&mut self, idx: usize) -> (Option<GameResult>, Vec<RoundStep>) {
         let mut log = Vec::new();
         let p = self.current_player();
         self.play_internal(p, idx, &mut log);
@@ -1166,22 +1155,34 @@ mod tests {
     fn round_score_components() {
         // Pure card: 0
         assert_eq!(
-            round_score(&Card::new(Suit::Acorns, Rank::Seven), Card::new(Suit::Hearts, Rank::Unter)),
+            round_score(
+                &Card::new(Suit::Acorns, Rank::Seven),
+                Card::new(Suit::Hearts, Rank::Unter)
+            ),
             0
         );
         // Trump suit, not striker rank: 100
         assert_eq!(
-            round_score(&Card::new(Suit::Hearts, Rank::Ace), Card::new(Suit::Hearts, Rank::Unter)),
+            round_score(
+                &Card::new(Suit::Hearts, Rank::Ace),
+                Card::new(Suit::Hearts, Rank::Unter)
+            ),
             100
         );
         // Striker rank, not trump suit: 200
         assert_eq!(
-            round_score(&Card::new(Suit::Bells, Rank::Unter), Card::new(Suit::Hearts, Rank::Unter)),
+            round_score(
+                &Card::new(Suit::Bells, Rank::Unter),
+                Card::new(Suit::Hearts, Rank::Unter)
+            ),
             200
         );
         // Rechte (trump suit AND striker rank): 300
         assert_eq!(
-            round_score(&Card::new(Suit::Hearts, Rank::Unter), Card::new(Suit::Hearts, Rank::Unter)),
+            round_score(
+                &Card::new(Suit::Hearts, Rank::Unter),
+                Card::new(Suit::Hearts, Rank::Unter)
+            ),
             300
         );
     }
@@ -1191,8 +1192,8 @@ mod tests {
         let rechte = Card::new(Suit::Hearts, Rank::Unter);
         // Lead trump, then a non-trump striker.
         let trick = vec![
-            Card::new(Suit::Hearts, Rank::Ace),   // 0: trump non-striker, 100+8 = 108
-            Card::new(Suit::Bells, Rank::Unter),  // 1: striker non-trump,  200+0 = 200
+            Card::new(Suit::Hearts, Rank::Ace), // 0: trump non-striker, 100+8 = 108
+            Card::new(Suit::Bells, Rank::Unter), // 1: striker non-trump,  200+0 = 200
         ];
         assert_eq!(trick_winner_position(&trick, rechte), 1);
     }
@@ -1202,8 +1203,8 @@ mod tests {
         // Lead trump suit, Rechte is the lead.
         let rechte = Card::new(Suit::Leaves, Rank::Ober);
         let trick = vec![
-            Card::new(Suit::Leaves, Rank::Ober),  // 0: rechte         300 + 6 = 306
-            Card::new(Suit::Hearts, Rank::Ober),  // 1: striker (-400) 200 - 400 = -200
+            Card::new(Suit::Leaves, Rank::Ober), // 0: rechte         300 + 6 = 306
+            Card::new(Suit::Hearts, Rank::Ober), // 1: striker (-400) 200 - 400 = -200
         ];
         assert_eq!(trick_winner_position(&trick, rechte), 0);
     }
@@ -1212,7 +1213,7 @@ mod tests {
     fn pure_card_loses_to_trump() {
         let rechte = Card::new(Suit::Hearts, Rank::Unter);
         let trick = vec![
-            Card::new(Suit::Acorns, Rank::Ace),   // 0: pure same-suit  0 + 8 = 8
+            Card::new(Suit::Acorns, Rank::Ace), // 0: pure same-suit  0 + 8 = 8
             Card::new(Suit::Hearts, Rank::Seven), // 1: trump non-striker 100 + 0 = 100
         ];
         assert_eq!(trick_winner_position(&trick, rechte), 1);
@@ -1222,8 +1223,8 @@ mod tests {
     fn pure_card_loses_to_striker() {
         let rechte = Card::new(Suit::Hearts, Rank::Unter);
         let trick = vec![
-            Card::new(Suit::Acorns, Rank::Ace),   // 0: pure   0 + 8 = 8
-            Card::new(Suit::Bells, Rank::Unter),  // 1: striker 200 + 0 = 200
+            Card::new(Suit::Acorns, Rank::Ace),  // 0: pure   0 + 8 = 8
+            Card::new(Suit::Bells, Rank::Unter), // 1: striker 200 + 0 = 200
         ];
         assert_eq!(trick_winner_position(&trick, rechte), 1);
     }
@@ -1271,7 +1272,10 @@ mod tests {
         // Identity permutation for every player → P0 plays Bells Seven
         // (non-trump) while holding Hearts Ace (trump). Must-follow violated.
         let perms = [[0, 1, 2, 3, 4]; 4];
-        assert_eq!(simulate_game(&hands, perms, 0, rechte), GameResult::RuleViolation);
+        assert_eq!(
+            simulate_game(&hands, perms, 0, rechte),
+            GameResult::RuleViolation
+        );
     }
 
     #[test]
@@ -1314,8 +1318,8 @@ mod tests {
         // -400 trick-score override and loses.
         let rechte = Card::new(Suit::Hearts, Rank::Unter);
         let trick = vec![
-            Card::new(Suit::Bells, Rank::Unter),   // 0: 200 + rank_value(Unter)=5 (lead=Bells) = 205
-            Card::new(Suit::Leaves, Rank::Unter),  // 1: 200 - 400 = -200
+            Card::new(Suit::Bells, Rank::Unter), // 0: 200 + rank_value(Unter)=5 (lead=Bells) = 205
+            Card::new(Suit::Leaves, Rank::Unter), // 1: 200 - 400 = -200
         ];
         assert_eq!(trick_winner_position(&trick, rechte), 0);
     }
@@ -1499,10 +1503,13 @@ mod tests {
         // can no longer propose raises. The other team still can.
         let mut g = GameState::new(0);
         g.playing_round = true;
-        g.scores[0] = RAISE_LOCKOUT_SCORE;        // Team 1 at threshold
-        g.scores[1] = RAISE_LOCKOUT_SCORE - 1;    // Team 2 just below
+        g.scores[0] = RAISE_LOCKOUT_SCORE; // Team 1 at threshold
+        g.scores[1] = RAISE_LOCKOUT_SCORE - 1; // Team 2 just below
         assert!(g.propose_raise(0).is_err(), "Team 1 must be locked out");
-        assert!(g.propose_raise(1).is_ok(), "Team 2 is still allowed to raise");
+        assert!(
+            g.propose_raise(1).is_ok(),
+            "Team 2 is still allowed to raise"
+        );
         // Team 1 *can* still answer the raise.
         let outcome = g.respond_to_raise(0, true).unwrap();
         assert!(matches!(outcome, RaiseOutcome::Accepted { .. }));
@@ -1532,9 +1539,9 @@ mod tests {
 
         let lead_card = players[0].play_card(&[0], None);
         let mut cards = vec![lead_card];
-        for i in 1..4 {
-            let allowed: Vec<usize> = (0..players[i].hand.len()).collect();
-            cards.push(players[i].play_card(&allowed, None));
+        for player in players[1..4].iter_mut() {
+            let allowed: Vec<usize> = (0..player.hand.len()).collect();
+            cards.push(player.play_card(&allowed, None));
         }
 
         let best_idx = trick_winner_position(&cards, rechte);
@@ -1556,16 +1563,16 @@ mod tests {
             Player::new(false),
             Player::new(false),
         ];
-        players[0].hand.push(Card::new(Suit::Hearts, Rank::Ace));   // trump, non-striker
-        players[1].hand.push(Card::new(Suit::Bells, Rank::Unter));  // striker (first)
-        players[2].hand.push(Card::new(Suit::Hearts, Rank::Nine));  // trump, non-striker
-        players[3].hand.push(rechte);                               // rechte (later striker)
+        players[0].hand.push(Card::new(Suit::Hearts, Rank::Ace)); // trump, non-striker
+        players[1].hand.push(Card::new(Suit::Bells, Rank::Unter)); // striker (first)
+        players[2].hand.push(Card::new(Suit::Hearts, Rank::Nine)); // trump, non-striker
+        players[3].hand.push(rechte); // rechte (later striker)
 
         let lead_card = players[0].play_card(&[0], None);
         let mut cards = vec![lead_card];
-        for i in 1..4 {
-            let allowed: Vec<usize> = (0..players[i].hand.len()).collect();
-            cards.push(players[i].play_card(&allowed, None));
+        for player in players[1..4].iter_mut() {
+            let allowed: Vec<usize> = (0..player.hand.len()).collect();
+            cards.push(player.play_card(&allowed, None));
         }
 
         let best_idx = trick_winner_position(&cards, rechte);
@@ -1629,16 +1636,10 @@ mod tests {
         // Lead is the Weli (Bells of Weli) — NOT a trump-suit card when
         // trump is Hearts. Per the user's spec only trump-suit leads
         // trigger must-follow, so seeing players may play anything.
-        assert_eq!(
-            g.allowed_indices(0, Card::new(Bells, Weli)),
-            vec![0, 1]
-        );
+        assert_eq!(g.allowed_indices(0, Card::new(Bells, Weli)), vec![0, 1]);
 
         // Same for a non-trump-suit striker lead (Leaves Unter).
-        assert_eq!(
-            g.allowed_indices(0, Card::new(Leaves, Unter)),
-            vec![0, 1]
-        );
+        assert_eq!(g.allowed_indices(0, Card::new(Leaves, Unter)), vec![0, 1]);
     }
 
     #[test]
@@ -1649,10 +1650,7 @@ mod tests {
         g.dealer = 0; // Player 0 dealer; players 0 and 1 are seeing.
         g.rechte = Some(Card::new(Hearts, Unter));
 
-        g.players[2].hand = vec![
-            Card::new(Hearts, Ace),
-            Card::new(Bells, King),
-        ];
+        g.players[2].hand = vec![Card::new(Hearts, Ace), Card::new(Bells, King)];
 
         let lead = Card::new(Hearts, Ten);
         let a = g.allowed_indices(2, lead);
@@ -1825,7 +1823,7 @@ mod tests {
         g.rechte = Some(Card::new(Suit::Hearts, Rank::Seven));
         // Only P3's (index 3) hand matters for `best_card_index_with_trick`.
         g.players[3].hand = vec![
-            Card::new(Suit::Hearts, Rank::Ace), // strongest trump
+            Card::new(Suit::Hearts, Rank::Ace),   // strongest trump
             Card::new(Suit::Hearts, Rank::Eight), // cheapest trump that wins
             Card::new(Suit::Hearts, Rank::Nine),
         ];
@@ -1846,7 +1844,7 @@ mod tests {
         }
 
         let trick = vec![
-            (0usize, Card::new(Suit::Bells, Rank::Nine)),  // P1 leads
+            (0usize, Card::new(Suit::Bells, Rank::Nine)), // P1 leads
             (1usize, Card::new(Suit::Bells, Rank::Ten)),
             (2usize, Card::new(Suit::Bells, Rank::Ober)),
         ];

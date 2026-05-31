@@ -65,8 +65,8 @@ fn raising_points_and_full_round() {
     let mut g = GameState::new(0);
     g.dealer = 0;
     g.rechte = Some(rechte);
-    for i in 0..4 {
-        g.players[i].hand = original_hands[i].clone();
+    for (player, hand) in g.players.iter_mut().zip(&original_hands) {
+        player.hand = hand.clone();
     }
     assert_eq!(g.round_points, watten::game::ROUND_POINTS);
     g.playing_round = true; // synthetic setup; bypass start_round
@@ -105,7 +105,11 @@ fn accepted_raise_pays_out_at_increased_value() {
     let scores_before = g.scores;
 
     // Team 1 (idx 0) proposes a raise; Team 2 (idx 1) accepts.
-    assert_eq!(g.round_points, watten::game::ROUND_POINTS, "starts at default");
+    assert_eq!(
+        g.round_points,
+        watten::game::ROUND_POINTS,
+        "starts at default"
+    );
     assert!(g.propose_raise(0).is_ok());
     let outcome = g
         .respond_to_raise(1, true)
@@ -129,10 +133,14 @@ fn accepted_raise_pays_out_at_increased_value() {
     // value (ROUND_POINTS + 1), not the pre-raise value.
     let gained_team_1 = g.scores[0] - scores_before[0];
     let gained_team_2 = g.scores[1] - scores_before[1];
-    assert_eq!(gained_team_1 + gained_team_2, watten::game::ROUND_POINTS + 1,
+    assert_eq!(
+        gained_team_1 + gained_team_2,
+        watten::game::ROUND_POINTS + 1,
         "the round must pay out at the raised value (ROUND_POINTS+1 = 3), \
          got team 1 gained {} and team 2 gained {}",
-        gained_team_1, gained_team_2);
+        gained_team_1,
+        gained_team_2
+    );
 }
 
 /// Two accepted raises (one by each team) should pay out at ROUND_POINTS+2.
@@ -186,7 +194,8 @@ fn human_must_play_five_cards_to_finish_a_round() {
         let (res, _) = g.human_play(0);
         if n < 3 {
             assert_eq!(
-                res, None,
+                res,
+                None,
                 "round ended early after human's {}-th additional play",
                 n + 2
             );

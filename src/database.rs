@@ -4,7 +4,8 @@ use std::ops::Range;
 use crate::{GameResult, HAND_PERMUTATIONS};
 
 /// Total number of slots in a fully-enumerated 120^4 database.
-const DB_TOTAL: usize = HAND_PERMUTATIONS * HAND_PERMUTATIONS * HAND_PERMUTATIONS * HAND_PERMUTATIONS;
+const DB_TOTAL: usize =
+    HAND_PERMUTATIONS * HAND_PERMUTATIONS * HAND_PERMUTATIONS * HAND_PERMUTATIONS;
 
 /// API for accessing the game database.
 pub trait GameDatabase {
