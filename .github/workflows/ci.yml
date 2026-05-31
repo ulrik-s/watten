@@ -67,6 +67,9 @@ jobs:
       - name: Build wasm (web target, for type info)
         working-directory: frontend
         run: npm run build:wasm
+      - name: Build wasm (node target, for the test import)
+        working-directory: frontend
+        run: npm run build:wasm:test
       - name: ESLint
         working-directory: frontend
         run: npm run lint
