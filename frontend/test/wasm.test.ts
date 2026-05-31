@@ -31,7 +31,10 @@ describe('WasmGame', () => {
 
   it('switches to the database evaluator on request', () => {
     const g = new wasm.WasmGame(0);
-    if (typeof g.set_evaluator === 'function' && typeof g.evaluator === 'function') {
+    if (
+      typeof g.set_evaluator === 'function' &&
+      typeof g.evaluator === 'function'
+    ) {
       g.set_evaluator('search');
       expect(g.evaluator()).toBe('search');
       // Don't actually populate the full DB (takes minutes); just verify the
@@ -45,7 +48,8 @@ describe('WasmGame', () => {
 describe('WasmGame round flow', () => {
   it('plays a full game to the winning score', () => {
     const g = new wasm.WasmGame(0);
-    const winning = typeof g.winning_points === 'function' ? g.winning_points() : 15;
+    const winning =
+      typeof g.winning_points === 'function' ? g.winning_points() : 15;
     let rounds = 0;
     while (g.scores()[0] < winning && g.scores()[1] < winning) {
       const [_result, steps] = g.play_round_logged() as [number, any[]];
@@ -61,7 +65,9 @@ describe('WasmGame round flow', () => {
       expect(rounds).toBeLessThan(60);
     }
     const final = Array.from(g.scores());
-    expect(Math.max(final[0] as number, final[1] as number)).toBeGreaterThanOrEqual(winning);
+    expect(
+      Math.max(final[0] as number, final[1] as number)
+    ).toBeGreaterThanOrEqual(winning);
   });
 
   it('returns move evaluations when there is a human player to move', () => {
@@ -88,7 +94,8 @@ describe('WasmGame round flow', () => {
 
   it('exposes the new 13-point target and the 10-point raise lockout', () => {
     const g = new wasm.WasmGame(0);
-    if (typeof g.winning_points === 'function') expect(g.winning_points()).toBe(13);
+    if (typeof g.winning_points === 'function')
+      expect(g.winning_points()).toBe(13);
     if (typeof g.raise_lockout_score === 'function')
       expect(g.raise_lockout_score()).toBe(10);
   });
@@ -156,7 +163,10 @@ describe('WasmGame round flow', () => {
     while (guard++ < 30) {
       const allowed = g.human_allowed_indices() as number[];
       if (allowed.length === 0) break;
-      const [res, _steps] = g.human_play(allowed[0]) as [number | undefined, unknown[]];
+      const [res, _steps] = g.human_play(allowed[0]) as [
+        number | undefined,
+        unknown[],
+      ];
       if (typeof res === 'number') break; // round ended
     }
 
@@ -172,7 +182,10 @@ describe('WasmGame round flow', () => {
   it('lets a team concede the round and awards points to the opponent', () => {
     const g = new wasm.WasmGame(0);
     g.start_round_interactive();
-    if (typeof g.raise_round === 'function' && typeof g.concede_round === 'function') {
+    if (
+      typeof g.raise_round === 'function' &&
+      typeof g.concede_round === 'function'
+    ) {
       expect(g.raise_round(0)).toBe(true);
       expect(g.raise_round(1)).toBe(true);
       const before = Array.from(g.scores()) as [number, number];

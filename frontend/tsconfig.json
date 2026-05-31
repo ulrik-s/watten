@@ -2,14 +2,21 @@
   "compilerOptions": {
     "target": "es2020",
     "module": "esnext",
-    "jsx": "react",
+    "jsx": "react-jsx",
     "moduleResolution": "node",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["vitest/globals", "@testing-library/jest-dom"],
-    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+    "types": ["node", "vitest/globals", "@testing-library/jest-dom"],
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "allowUnreachableCode": false
   },
-  "include": ["src/**/*", "test/**/*"]
+  "include": ["src/**/*", "test/**/*", "e2e/**/*"]
 }

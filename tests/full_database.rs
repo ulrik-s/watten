@@ -52,8 +52,7 @@ fn estimate_full_database_population_time() {
     let est_full = elapsed.as_secs_f64() * (full_total as f64 / subset_total as f64);
 
     println!(
-        "Elapsed {:?} for {} plays -> estimated full database {:.2} seconds",
-        elapsed, subset_total, est_full
+        "Elapsed {elapsed:?} for {subset_total} plays -> estimated full database {est_full:.2} seconds"
     );
 
     let p = (g.dealer + 1) % 4;

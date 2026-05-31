@@ -34,11 +34,11 @@ pub struct SearchPosition<'a> {
 }
 
 fn pack_key(remaining: [u8; 4], lead: u8) -> u32 {
-    (remaining[0] as u32)
-        | ((remaining[1] as u32) << 5)
-        | ((remaining[2] as u32) << 10)
-        | ((remaining[3] as u32) << 15)
-        | ((lead as u32) << 20)
+    u32::from(remaining[0])
+        | (u32::from(remaining[1]) << 5)
+        | (u32::from(remaining[2]) << 10)
+        | (u32::from(remaining[3]) << 15)
+        | (u32::from(lead) << 20)
 }
 
 fn is_seeing(player: u8, dealer: u8) -> bool {
@@ -89,7 +89,7 @@ fn trick_winner(plays: &[(u8, Card); 4], rechte: Card) -> u8 {
 
 /// Count, by future team-1 trick count, how many legal completions exist from
 /// this position. Returned slot `t` is the number of completion orderings in
-/// which team 1 wins exactly `t` of the *remaining* tricks (0..=tricks_left).
+/// which team 1 wins exactly `t` of the *remaining* tricks (`0..=tricks_left`).
 pub fn count_completions(
     pos: &SearchPosition<'_>,
     memo: &mut SearchMemo,
@@ -214,7 +214,7 @@ impl MoveEval {
         if self.total == 0 {
             0.0
         } else {
-            self.wins as f64 / self.total as f64
+            f64::from(self.wins) / f64::from(self.total)
         }
     }
 }

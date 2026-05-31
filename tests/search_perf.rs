@@ -51,7 +51,7 @@ fn search_full_round_perf() {
     let start = std::time::Instant::now();
     let counts = count_completions(&pos, &mut memo);
     let elapsed = start.elapsed();
-    let total: u64 = counts.iter().map(|&c| c as u64).sum();
+    let total: u64 = counts.iter().map(|&c| u64::from(c)).sum();
     println!(
         "search full round elapsed={:?} total_orderings={} memo_entries={}",
         elapsed,
@@ -78,7 +78,7 @@ fn evaluate_moves_perf_from_start() {
     let start = std::time::Instant::now();
     let moves = evaluate_moves(&pos, 1, &[], [0, 0], &[0, 1, 2, 3, 4], &mut memo);
     let elapsed = start.elapsed();
-    println!("evaluate_moves elapsed={:?}", elapsed);
+    println!("evaluate_moves elapsed={elapsed:?}");
     for m in &moves {
         println!(
             "  card[{}] wins={} total={} rate={:.3}",

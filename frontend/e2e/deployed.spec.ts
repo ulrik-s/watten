@@ -16,7 +16,9 @@ test.describe('deployed site', () => {
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Watten');
     // The Raise / Concede controls only render after the WasmGame is
     // constructed; if they appear, wasm has loaded and the React app is alive.
-    await expect(page.getByRole('button', { name: /Raise/ })).toBeVisible({ timeout: 30000 });
+    await expect(page.getByRole('button', { name: /Raise/ })).toBeVisible({
+      timeout: 30000,
+    });
     await expect(page.getByRole('button', { name: /Concede/ })).toBeVisible();
     // The fallback container should be gone.
     await expect(page.locator('#fallback')).toHaveCount(0);

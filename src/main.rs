@@ -6,11 +6,7 @@ fn main() {
     println!("Play with a human player? [y/N]");
     let mut input = String::new();
     io::stdin().read_line(&mut input).unwrap();
-    let humans = if input.trim().eq_ignore_ascii_case("y") {
-        1
-    } else {
-        0
-    };
+    let humans = usize::from(input.trim().eq_ignore_ascii_case("y"));
 
     let mut game = GameState::new(humans);
     game.verbose = true;

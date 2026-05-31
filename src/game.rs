@@ -45,7 +45,7 @@ impl MoveEvaluation {
         if self.total == 0 {
             0.0
         } else {
-            self.wins as f64 / self.total as f64
+            f64::from(self.wins) / f64::from(self.total)
         }
     }
 
@@ -105,7 +105,7 @@ fn trick_local_score(
         current_trick[leader_pos].0 % 2
     };
 
-    let candidate_value = card_score(&candidate, pos, &trick, rechte) as i64;
+    let candidate_value = i64::from(card_score(&candidate, pos, &trick, rechte));
 
     const TAKE_TRICK: i64 = 1_000_000;
     if leader_team == team {
@@ -315,7 +315,7 @@ impl GameState {
     }
 
     /// Tricks each team has won so far in the current round (resets to
-    /// `[0, 0]` at start_round_interactive).
+    /// `[0, 0]` at `start_round_interactive`).
     pub fn tricks_won_for_round(&self) -> [usize; 2] {
         self.tricks_won
     }
@@ -327,9 +327,8 @@ impl GameState {
     /// the wasm UI where blocking the JS thread on a multi-minute
     /// populate is undesirable.
     pub fn begin_database_populate(&mut self) -> usize {
-        let rechte = match self.rechte {
-            Some(r) => r,
-            None => return 0,
+        let Some(rechte) = self.rechte else {
+            return 0;
         };
         self.evaluator_kind = Evaluator::Database;
         let mut db = DatabaseEvaluator::new();
@@ -356,7 +355,7 @@ impl GameState {
     fn rebuild_database_evaluator(&mut self) {
         if matches!(self.evaluator_kind, Evaluator::Database) {
             let mut db = DatabaseEvaluator::new();
-            db.perm_range = self.perm_range.clone();
+            db.perm_range.clone_from(&self.perm_range);
             db.workers = self.workers;
             self.evaluator = Box::new(db);
         }
@@ -402,7 +401,7 @@ impl GameState {
         self.last_raise_by = None;
         let mut cards = deck();
         shuffle(&mut cards);
-        for p in self.players.iter_mut() {
+        for p in &mut self.players {
             p.hand.clear();
         }
         for i in 0..4 {
@@ -448,9 +447,8 @@ impl GameState {
         current_trick: &[(usize, Card)],
         tricks_won: [usize; 2],
     ) -> Vec<MoveEvaluation> {
-        let rechte = match self.rechte {
-            Some(r) => r,
-            None => return Vec::new(),
+        let Some(rechte) = self.rechte else {
+            return Vec::new();
         };
         let allowed_orig: Vec<usize> = allowed_hand_indices
             .iter()
@@ -524,7 +522,7 @@ impl GameState {
         // every legal completion.
         let max_rate = evals
             .iter()
-            .map(|e| e.rate())
+            .map(MoveEvaluation::rate)
             .fold(f64::NEG_INFINITY, f64::max);
 
         // Secondary criterion: when several cards tie on round-win rate
@@ -550,9 +548,8 @@ impl GameState {
         if tied.len() == 1 {
             return tied[0].hand_idx;
         }
-        let rechte = match self.rechte {
-            Some(r) => r,
-            None => return tied[0].hand_idx,
+        let Some(rechte) = self.rechte else {
+            return tied[0].hand_idx;
         };
         let team = p_idx % 2;
         let mut best = tied[0];
@@ -656,9 +653,8 @@ impl GameState {
         if team > 1 {
             return Err("invalid team");
         }
-        let proposing = match self.pending_raise {
-            Some(t) => t,
-            None => return Err("no pending raise"),
+        let Some(proposing) = self.pending_raise else {
+            return Err("no pending raise");
         };
         if proposing == team {
             return Err("the proposing team cannot respond to its own raise");
@@ -695,9 +691,8 @@ impl GameState {
     /// Accept threshold: 0.30 — if the responding team's estimated win
     /// probability from the current position is below 30% they fold.
     pub fn auto_respond_raise(&mut self) -> Result<RaiseOutcome, &'static str> {
-        let proposing = match self.pending_raise {
-            Some(t) => t,
-            None => return Err("no pending raise"),
+        let Some(proposing) = self.pending_raise else {
+            return Err("no pending raise");
         };
         let responding = 1 - proposing;
         let rate = self.estimate_team_win_rate(responding).unwrap_or(0.5);
@@ -724,7 +719,7 @@ impl GameState {
             return None;
         }
         let wins: u32 = evals.iter().map(|e| e.wins).sum();
-        let rate = wins as f64 / total as f64; // probability for `p`'s team
+        let rate = f64::from(wins) / f64::from(total); // probability for `p`'s team
         if team == p % 2 {
             Some(rate)
         } else {
@@ -794,7 +789,7 @@ impl GameState {
             if let Some(rechte) = self.rechte {
                 println!("Trump suit is {}", rechte.suit);
                 println!("Striker rank is {}", rechte.rank);
-                println!("Rechte is {}", rechte);
+                println!("Rechte is {rechte}");
             }
         }
         let mut tricks = [0usize; 2];
@@ -995,13 +990,9 @@ impl GameState {
         self.dealer = (self.dealer + 1) % 4;
         // If the round was decided by concede/fold the winner is fixed;
         // otherwise it's the team that took more tricks.
-        let winner_team = self.round_decided.unwrap_or_else(|| {
-            if self.tricks_won[0] > self.tricks_won[1] {
-                0
-            } else {
-                1
-            }
-        });
+        let winner_team = self
+            .round_decided
+            .unwrap_or_else(|| usize::from(self.tricks_won[1] >= self.tricks_won[0]));
         self.scores[winner_team] += self.round_points;
         self.round_decided = None;
     }
@@ -1093,14 +1084,14 @@ impl GameState {
         let tricks_won = self.tricks_won;
         let idx = self.best_card_index_with_trick(p, &allowed, &trick, tricks_won);
         self.play_internal(p, idx, &mut log);
-        let result = if !self.playing_round {
+        let result = if self.playing_round {
+            None
+        } else {
             Some(if self.tricks_won[0] > self.tricks_won[1] {
                 GameResult::Team1Win
             } else {
                 GameResult::Team2Win
             })
-        } else {
-            None
         };
         (result, log)
     }
@@ -1133,14 +1124,14 @@ impl GameState {
         let mut log = Vec::new();
         let p = self.current_player();
         self.play_internal(p, idx, &mut log);
-        let result = if !self.playing_round {
+        let result = if self.playing_round {
+            None
+        } else {
             Some(if self.tricks_won[0] > self.tricks_won[1] {
                 GameResult::Team1Win
             } else {
                 GameResult::Team2Win
             })
-        } else {
-            None
         };
         (result, log)
     }
@@ -1348,9 +1339,7 @@ mod tests {
             assert_ne!(
                 dealer % 2,
                 forehand % 2,
-                "dealer={} and forehand={} must be on different teams",
-                dealer,
-                forehand
+                "dealer={dealer} and forehand={forehand} must be on different teams"
             );
             // The dealer's *partner* (sitting opposite) is dealer + 2.
             let partner = (dealer + 2) % 4;
@@ -1539,7 +1528,7 @@ mod tests {
 
         let lead_card = players[0].play_card(&[0], None);
         let mut cards = vec![lead_card];
-        for player in players[1..4].iter_mut() {
+        for player in &mut players[1..4] {
             let allowed: Vec<usize> = (0..player.hand.len()).collect();
             cards.push(player.play_card(&allowed, None));
         }
@@ -1570,7 +1559,7 @@ mod tests {
 
         let lead_card = players[0].play_card(&[0], None);
         let mut cards = vec![lead_card];
-        for player in players[1..4].iter_mut() {
+        for player in &mut players[1..4] {
             let allowed: Vec<usize> = (0..player.hand.len()).collect();
             cards.push(player.play_card(&allowed, None));
         }
@@ -1783,9 +1772,7 @@ mod tests {
         // Confidence: cached path should be at least 2x faster.
         assert!(
             second * 2 <= first || first.as_micros() < 200,
-            "second={:?} first={:?}",
-            second,
-            first
+            "second={second:?} first={first:?}"
         );
 
         // Also verify that count_completions populates a fresh memo with
@@ -1857,8 +1844,7 @@ mod tests {
         assert_eq!(
             picked,
             Card::new(Suit::Hearts, Rank::Eight),
-            "bot should take the trick with the cheapest sufficient trump, got {:?}",
-            picked
+            "bot should take the trick with the cheapest sufficient trump, got {picked:?}"
         );
     }
 }

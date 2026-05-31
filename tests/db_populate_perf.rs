@@ -1,5 +1,5 @@
 //! Measures the time it takes to fully populate the 120^4 database
-//! evaluator from a real start_round_interactive deal. Ignored by default
+//! evaluator from a real `start_round_interactive` deal. Ignored by default
 //! (it really does run 207 million games — release-mode only takes a
 //! reasonable amount of time). Run with:
 //!
@@ -14,7 +14,7 @@ fn full_database_populate_release_perf() {
     g.start_round_interactive();
     let start = std::time::Instant::now();
     let total = g.begin_database_populate();
-    eprintln!("Populating {} games…", total);
+    eprintln!("Populating {total} games…");
     let batch = 5_000_000usize;
     let mut last_report = std::time::Instant::now();
     loop {

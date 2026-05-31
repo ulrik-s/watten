@@ -1,0 +1,30 @@
+# Git hooks managed by lefthook (https://lefthook.dev).
+# Install once after cloning:  npx lefthook install   (or: make hooks)
+#
+# `glob` gates each command on whether any staged file matches, so a
+# docs-only commit skips the Rust/TS checks entirely.
+
+pre-commit:
+  parallel: true
+  commands:
+    cargo-fmt:
+      glob: '*.rs'
+      run: cargo fmt --check
+    cargo-clippy:
+      glob: '*.rs'
+      run: cargo clippy --all-targets -- -D warnings
+    frontend-lint:
+      glob: 'frontend/**/*.{ts,tsx}'
+      run: npm --prefix frontend run lint
+    frontend-format:
+      glob: 'frontend/**/*.{ts,tsx,js,json,css,html}'
+      run: npm --prefix frontend run format:check
+
+pre-push:
+  parallel: true
+  commands:
+    cargo-test:
+      run: cargo test
+    cargo-deny:
+      glob: '{Cargo.toml,Cargo.lock,deny.toml}'
+      run: cargo deny check

@@ -16,7 +16,7 @@ impl std::fmt::Display for Suit {
             Suit::Leaves => "Leaves",
             Suit::Acorns => "Acorns",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -47,7 +47,7 @@ impl std::fmt::Display for Rank {
             Rank::Ace => "Ace",
             Rank::Weli => "Weli",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -71,8 +71,8 @@ impl std::fmt::Display for Card {
 
 /// Return a deck containing all 33 Watten cards
 pub fn deck() -> Vec<Card> {
-    use Rank::*;
-    use Suit::*;
+    use Rank::{Ace, Eight, King, Nine, Ober, Seven, Ten, Unter, Weli};
+    use Suit::{Acorns, Bells, Hearts, Leaves};
     let mut cards = Vec::new();
     let ranks = [Seven, Eight, Nine, Ten, Unter, Ober, King, Ace];
     for &suit in &[Hearts, Bells, Leaves, Acorns] {
@@ -81,7 +81,7 @@ pub fn deck() -> Vec<Card> {
         }
     }
     // Add Weli (6 of Bells)
-    cards.push(Card::new(Suit::Bells, Weli));
+    cards.push(Card::new(Bells, Weli));
     cards
 }
 
@@ -211,7 +211,7 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for p in &perms {
             let idx = perm_index(p);
-            assert!(seen.insert(idx), "duplicate index {}", idx);
+            assert!(seen.insert(idx), "duplicate index {idx}");
         }
     }
 

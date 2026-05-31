@@ -1,6 +1,7 @@
 # Convenience targets for local development. Run `make help` for a summary.
 
-.PHONY: help dev build test test-rust test-js test-e2e coverage coverage-rust coverage-js clean fmt
+.PHONY: help dev build test test-rust test-js test-e2e coverage coverage-rust \
+        coverage-js clean fmt lint lint-rust lint-js audit hooks
 
 help:
 	@echo "Watten — local commands"
@@ -13,7 +14,12 @@ help:
 	@echo "  make test-js        Vitest only"
 	@echo "  make test-e2e       Playwright E2E (Chromium + Firefox + WebKit)"
 	@echo "  make coverage       Generate Rust + JS coverage reports"
-	@echo "  make fmt            cargo fmt"
+	@echo "  make lint           Run every linter (Rust + JS) — same as CI"
+	@echo "  make lint-rust      rustfmt --check, clippy -D warnings"
+	@echo "  make lint-js        eslint, prettier --check, tsc --noEmit"
+	@echo "  make audit          cargo deny check + cargo machete"
+	@echo "  make fmt            Auto-format Rust (cargo fmt) and JS (prettier)"
+	@echo "  make hooks          Install the lefthook git hooks"
 	@echo "  make clean          Remove build artefacts"
 
 dev:
@@ -44,8 +50,25 @@ coverage-js:
 	cd frontend && npm run coverage
 	@echo "JS HTML report: frontend/coverage/index.html"
 
+lint: lint-rust lint-js
+
+lint-rust:
+	cargo fmt -- --check
+	cargo clippy --all-targets -- -D warnings
+
+lint-js:
+	cd frontend && npm run lint && npm run format:check && npm run typecheck
+
+audit:
+	cargo deny check
+	cargo machete
+
 fmt:
 	cargo fmt
+	cd frontend && npm run format
+
+hooks:
+	npx lefthook install
 
 clean:
 	cargo clean

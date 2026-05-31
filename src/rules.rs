@@ -9,14 +9,14 @@
 //!
 //! ## Scoring model
 //!
-//!   card_score = round_score + trick_score
+//!   `card_score` = `round_score` + `trick_score`
 //!
-//! ### round_score (fixed for the whole round)
+//! ### `round_score` (fixed for the whole round)
 //!   - trump suit:    +100
 //!   - striker rank:  +200
 //!   - Rechte (both): +300
 //!
-//! ### trick_score (depends on play order in the trick)
+//! ### `trick_score` (depends on play order in the trick)
 //!   - If a striker is played AFTER an earlier striker in the same trick,
 //!     the later striker scores **-400** (the first striker dominates).
 //!   - Otherwise, if the card matches the lead suit, score = rank + 20.
@@ -79,7 +79,7 @@ pub fn trick_score(card: &Card, position: usize, trick: &[Card], rechte: Card) -
         return -400;
     }
     let lead_suit = trick[0].suit;
-    let rv = rank_value(card.rank) as i16;
+    let rv = i16::from(rank_value(card.rank));
     if card.suit == lead_suit {
         rv + 20
     } else {

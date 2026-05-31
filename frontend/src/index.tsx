@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import init, { WasmGame } from '../pkg/watten';
 import './table.css';
@@ -11,20 +11,13 @@ import {
   trickScore,
   trickWinnerIndex,
 } from './scoring';
+import type { JsRoundStep, MoveEval, TypedWasmGame } from './wasm';
 
-interface JsRoundStep {
-  player: number;
-  hand: JsCard[];
-  allowed: number[];
-  played: JsCard;
-}
-
-interface MoveEval {
-  hand_idx: number;
-  wins: number;
-  total: number;
-  illegal: number;
-  rate: number;
+declare global {
+  interface Window {
+    /** Debug handle to the live game, exposed for devtools poking. */
+    __watten_g?: TypedWasmGame;
+  }
 }
 
 const NUM_PLAYERS = 4;
@@ -48,21 +41,29 @@ function sleep(ms: number) {
 }
 
 const App = () => {
-  const [game, setGame] = useState<WasmGame | null>(null);
+  const [game, setGame] = useState<TypedWasmGame | null>(null);
   // slots[i] is the card in original-deal position i, or null if the human
   // has already played it this round. Length is always CARDS_PER_HAND so the
   // layout never reflows.
-  const [slots, setSlots] = useState<(JsCard | null)[]>(
-    Array(CARDS_PER_HAND).fill(null)
+  const [slots, setSlots] = useState<(JsCard | null)[]>(() =>
+    Array<JsCard | null>(CARDS_PER_HAND).fill(null)
   );
-  const slotsRef = useRef<(JsCard | null)[]>(Array(CARDS_PER_HAND).fill(null));
+  const slotsRef = useRef<(JsCard | null)[]>(
+    Array<JsCard | null>(CARDS_PER_HAND).fill(null)
+  );
   const [allowedSlots, setAllowedSlots] = useState<Set<number>>(new Set());
-  const [evalBySlot, setEvalBySlot] = useState<Map<number, MoveEval>>(new Map());
+  const [evalBySlot, setEvalBySlot] = useState<Map<number, MoveEval>>(
+    new Map()
+  );
   const [log, setLog] = useState<string[]>([]);
   const [trick, setTrick] = useState<TrickEntry[]>([]);
-  const [opponentHandSizes, setOpponentHandSizes] = useState<number[]>([5, 5, 5, 5]);
+  const [opponentHandSizes, setOpponentHandSizes] = useState<number[]>([
+    5, 5, 5, 5,
+  ]);
   const [scores, setScores] = useState<[number, number]>([0, 0]);
-  const [tricksThisRound, setTricksThisRound] = useState<[number, number]>([0, 0]);
+  const [tricksThisRound, setTricksThisRound] = useState<[number, number]>([
+    0, 0,
+  ]);
   const [showDebug, setShowDebug] = useState(false);
   const [useDatabaseEvaluator, setUseDatabaseEvaluator] = useState(false);
   const [evaluatorBusy, setEvaluatorBusy] = useState(false);
@@ -76,7 +77,10 @@ const App = () => {
   const [raiseLockoutScore, setRaiseLockoutScore] = useState(10);
   const [dealer, setDealer] = useState(0);
   const [humanIsSeer, setHumanIsSeer] = useState(true);
-  const [gameOver, setGameOver] = useState<null | { winner: 1 | 2; final: [number, number] }>(null);
+  const [gameOver, setGameOver] = useState<null | {
+    winner: 1 | 2;
+    final: [number, number];
+  }>(null);
   const [busy, setBusy] = useState(false);
   const [roundNumber, setRoundNumber] = useState(1);
   // Brief "Round N is starting" announcement that fades away after the deal.
@@ -129,7 +133,10 @@ const App = () => {
   }, [stepMode]);
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem('watten.showAllHands', showAllHands ? '1' : '0');
+      window.localStorage.setItem(
+        'watten.showAllHands',
+        showAllHands ? '1' : '0'
+      );
     }
   }, [showAllHands]);
 
@@ -152,29 +159,27 @@ const App = () => {
   }, [log]);
 
   useEffect(() => {
-    init().then(() => {
-      const g = new WasmGame(1);
+    void init().then(() => {
+      const g: TypedWasmGame = new WasmGame(1);
       // Debug convenience: expose the WasmGame on window so it can be
       // poked at from the browser devtools console (e.g. to call
       // `__watten_g.move_evaluations_for(2)` while staring at the
       // rendered hand).
-      (window as any).__watten_g = g;
-      setWinningPoints((g as any).winning_points?.() ?? 13);
-      setRaiseLockoutScore((g as any).raise_lockout_score?.() ?? 10);
+      window.__watten_g = g;
+      setWinningPoints(g.winning_points());
+      setRaiseLockoutScore(g.raise_lockout_score());
       g.start_round_interactive();
       setGame(g);
       setTrump(g.trump_suit() ?? null);
       setStriker(g.striker_rank() ?? null);
-      const r = ((g as any).rechte?.() ?? null) as JsCard | null;
+      const r = g.rechte();
       rechteRef.current = r;
       setRechte(r);
-      const d = ((g as any).dealer?.() ?? 0) as number;
+      const d = g.dealer();
       setDealer(d);
-      setHumanIsSeer(
-        ((g as any).is_seer?.(0) ?? (d === 0 || d === 3)) as boolean
-      );
+      setHumanIsSeer(g.is_seer(0));
       // Capture the original 5-card hand for the human.
-      const orig = g.hand(0) as JsCard[];
+      const orig = g.hand(0);
       slotsRef.current = padSlots(orig);
       setSlots([...slotsRef.current]);
       // Bots advance to the human's first move; animate their plays in.
@@ -183,7 +188,7 @@ const App = () => {
         refreshFromGame(g);
         maybeArmAwaitingPlay(g);
       } else {
-        const [, steps] = g.advance_bots() as [number | null, JsRoundStep[]];
+        const [, steps] = g.advance_bots();
         void processStepsAnimated(steps).then(() => refreshFromGame(g));
       }
     });
@@ -193,17 +198,18 @@ const App = () => {
   // Set or clear `awaitingPlay` based on whose turn it is right now. In
   // step mode the UI parks here whenever a bot is up next so the user
   // can read the win-rate panel before clicking Play.
-  function maybeArmAwaitingPlay(g: WasmGame) {
+  function maybeArmAwaitingPlay(g: TypedWasmGame) {
     if (!stepModeRef.current) {
       setAwaitingPlay(false);
       return;
     }
-    const isBot = (g as any).current_is_bot?.() as boolean | undefined;
-    setAwaitingPlay(!!isBot);
+    setAwaitingPlay(g.current_is_bot());
   }
 
   function padSlots(hand: JsCard[]): (JsCard | null)[] {
-    const out: (JsCard | null)[] = Array(CARDS_PER_HAND).fill(null);
+    const out: (JsCard | null)[] = Array<JsCard | null>(CARDS_PER_HAND).fill(
+      null
+    );
     for (let i = 0; i < hand.length && i < CARDS_PER_HAND; i++) {
       out[i] = hand[i];
     }
@@ -216,24 +222,24 @@ const App = () => {
     return n;
   }
 
-  function refreshTricksThisRound(g: WasmGame) {
-    const t = ((g as any).tricks_won?.() ?? null) as number[] | null;
-    if (t && t.length >= 2) {
+  function refreshTricksThisRound(g: TypedWasmGame) {
+    const t = g.tricks_won();
+    if (t.length >= 2) {
       setTricksThisRound([t[0], t[1]]);
     }
   }
 
-  function refreshFromGame(g: WasmGame) {
-    const currentHand = g.hand(0) as JsCard[];
+  function refreshFromGame(g: TypedWasmGame) {
+    const currentHand = g.hand(0);
     // `human_allowed_indices()` and `human_move_evaluations()` actually
     // return data for whichever player is on the move — so the values
     // are only meaningful for the human's hand when it really is the
     // human's turn. Otherwise we'd be painting bot rates onto the
     // player's own cards.
-    const cp = (g as any).current_player?.() as number | null | undefined;
+    const cp = g.current_player();
     const isHumanTurn = cp === 0;
-    const currentAllowed = isHumanTurn ? (g.human_allowed_indices() as number[]) : [];
-    const evs = isHumanTurn ? (g.human_move_evaluations() as MoveEval[]) : [];
+    const currentAllowed = isHumanTurn ? g.human_allowed_indices() : [];
+    const evs = isHumanTurn ? g.human_move_evaluations() : [];
 
     // Map each card in the current hand back to its slot via card identity.
     const allowedSet = new Set<number>();
@@ -251,7 +257,7 @@ const App = () => {
     setAllowedSlots(allowedSet);
     setEvalBySlot(evalMap);
     setScores(g.scores() as unknown as [number, number]);
-    setRoundPoints((g as any).round_points?.() ?? 2);
+    setRoundPoints(g.round_points());
     refreshTricksThisRound(g);
 
     // Pull every player's hand + evals so the "Show all hands" panel
@@ -260,21 +266,19 @@ const App = () => {
     // the search evaluator and microseconds against the populated DB.
     const hands: JsCard[][] = [[], [], [], []];
     const evalMaps: Map<number, MoveEval>[] = [
-      new Map(),
-      new Map(),
-      new Map(),
-      new Map(),
+      new Map<number, MoveEval>(),
+      new Map<number, MoveEval>(),
+      new Map<number, MoveEval>(),
+      new Map<number, MoveEval>(),
     ];
     for (let p = 0; p < NUM_PLAYERS; p++) {
-      hands[p] = g.hand(p) as JsCard[];
-      const pe = (g as any).move_evaluations_for?.(p) as MoveEval[] | undefined;
-      if (pe) {
-        for (const e of pe) evalMaps[p].set(e.hand_idx, e);
-      }
+      hands[p] = g.hand(p);
+      const pe = g.move_evaluations_for(p);
+      for (const e of pe) evalMaps[p].set(e.hand_idx, e);
     }
     setAllHands(hands);
     setEvalsByPlayer(evalMaps);
-    setCurrentPlayer(cp === null || cp === undefined ? null : (cp as number));
+    setCurrentPlayer(cp ?? null);
   }
 
   async function processStepsAnimated(steps: JsRoundStep[]) {
@@ -320,7 +324,10 @@ const App = () => {
         const winnerPos = trickWinnerIndex(nextTrick, rechteRef.current);
         const winnerPlayer = nextTrick[winnerPos].player;
         setTrickWinnerPos(winnerPos);
-        setLog((prev) => [...prev, `Player ${winnerPlayer + 1} wins the trick`]);
+        setLog((prev) => [
+          ...prev,
+          `Player ${winnerPlayer + 1} wins the trick`,
+        ]);
         // Update the team's trick-count for this round visibly the moment
         // the trick completes.
         setTricksThisRound((prev) => {
@@ -346,7 +353,9 @@ const App = () => {
 
     // Optimistic hand-slot removal: the player gets instant feedback that
     // their click registered.
-    slotsRef.current = slotsRef.current.map((c, i) => (i === slotIdx ? null : c));
+    slotsRef.current = slotsRef.current.map((c, i) =>
+      i === slotIdx ? null : c
+    );
     setSlots([...slotsRef.current]);
     setAllowedSlots(new Set());
     setEvalBySlot(new Map());
@@ -356,9 +365,9 @@ const App = () => {
     // each bot; in auto mode `human_play` chains the full bot turn for
     // us. NOTE: serde-wasm-bindgen serializes Rust `None` as JS
     // `undefined`, not `null`, so use `typeof === 'number'`.
-    const [res, steps] = (stepModeRef.current
-      ? (game as any).human_play_no_advance(currentIdx)
-      : game.human_play(currentIdx)) as [number | undefined, JsRoundStep[]];
+    const [res, steps] = stepModeRef.current
+      ? game.human_play_no_advance(currentIdx)
+      : game.human_play(currentIdx);
     await processStepsAnimated(steps);
 
     if (typeof res === 'number') {
@@ -379,7 +388,7 @@ const App = () => {
     if (!awaitingPlay) return;
     setBusy(true);
     setAwaitingPlay(false);
-    const out = (game as any).advance_one_bot?.() as [number | undefined, JsRoundStep[]] | undefined;
+    const out = game.advance_one_bot();
     if (!out) {
       setBusy(false);
       return;
@@ -395,7 +404,7 @@ const App = () => {
     setBusy(false);
   }
 
-  async function handleRoundEnded(g: WasmGame) {
+  async function handleRoundEnded(g: TypedWasmGame) {
     const s = g.scores() as unknown as [number, number];
     setScores(s);
     setLog((prev) => [
@@ -424,16 +433,13 @@ const App = () => {
     g.start_round_interactive();
     setTrump(g.trump_suit() ?? null);
     setStriker(g.striker_rank() ?? null);
-    const r = ((g as any).rechte?.() ?? null) as JsCard | null;
+    const r = g.rechte();
     rechteRef.current = r;
     setRechte(r);
-    const d = ((g as any).dealer?.() ?? 0) as number;
-    setDealer(d);
-    setHumanIsSeer(
-      ((g as any).is_seer?.(0) ?? (d === 0 || d === 3)) as boolean
-    );
+    setDealer(g.dealer());
+    setHumanIsSeer(g.is_seer(0));
     setOpponentHandSizes([5, 5, 5, 5]);
-    const orig = g.hand(0) as JsCard[];
+    const orig = g.hand(0);
     slotsRef.current = padSlots(orig);
     setSlots([...slotsRef.current]);
     setRoundNumber(nextRound);
@@ -462,28 +468,10 @@ const App = () => {
       setBusy(false);
       return;
     }
-    const [, st] = g.advance_bots() as [number | null, JsRoundStep[]];
+    const [, st] = g.advance_bots();
     await processStepsAnimated(st);
     refreshFromGame(g);
     setBusy(false);
-  }
-
-  async function playOutRoundIfNeeded(g: WasmGame) {
-    // After concede/fold the engine knows the winner; finish the round by
-    // animating every remaining card before dealing a new one.
-    const out = (g as any).auto_play_round?.() as
-      | null
-      | { ended: boolean; steps: JsRoundStep[] };
-    if (!out) return;
-    if (out.steps && out.steps.length > 0) {
-      await processStepsAnimated(out.steps);
-    }
-    if (out.ended) {
-      await handleRoundEnded(g);
-    } else {
-      refreshFromGame(g);
-      setBusy(false);
-    }
   }
 
   // Pump the chunked 120⁴ populate for the current deal. Returns true on
@@ -491,14 +479,17 @@ const App = () => {
   // Shared by `onToggleEvaluator` (initial activation) and
   // `handleRoundEnded` (re-populate at every new deal — the indices are
   // per-deal so the previous round's DB doesn't transfer).
-  async function runChunkedPopulate(g: WasmGame, label: string): Promise<boolean> {
+  async function runChunkedPopulate(
+    g: TypedWasmGame,
+    label: string
+  ): Promise<boolean> {
     cancelDbPopulate.current = false;
     setEvaluatorBusy(true);
     setDbProgress(0);
     setLog((prev) => [...prev, label]);
     // Defer one tick so React paints the 0% bar before wasm starts.
     await sleep(0);
-    const total = (g as any).database_populate_begin?.() as number;
+    const total = g.database_populate_begin();
     if (!total || total <= 0) {
       setEvaluatorBusy(false);
       setDbProgress(null);
@@ -511,16 +502,14 @@ const App = () => {
     let done = 0;
     while (done < total) {
       if (cancelDbPopulate.current) {
-        (g as any).set_evaluator?.('search');
+        g.set_evaluator('search');
         setDbProgress(null);
         setUseDatabaseEvaluator(false);
         setEvaluatorBusy(false);
         setLog((prev) => [...prev, 'Database populate cancelled.']);
         return false;
       }
-      const out = (g as any).database_populate_step?.(BATCH) as
-        | null
-        | { done: number; total: number; complete: boolean };
+      const out = g.database_populate_step(BATCH);
       if (!out) break;
       done = out.done;
       setDbProgress(out.done / out.total);
@@ -543,14 +532,17 @@ const App = () => {
     if (!game || evaluatorBusy) return;
     if (!useDb) {
       // Switching back to search is instant.
-      (game as any).set_evaluator?.('search');
+      game.set_evaluator('search');
       setUseDatabaseEvaluator(false);
       setDbProgress(null);
       setLog((prev) => [...prev, 'Switched to fast search evaluator.']);
       refreshFromGame(game);
       return;
     }
-    const ok = await runChunkedPopulate(game, 'Starting 120⁴ database populate…');
+    const ok = await runChunkedPopulate(
+      game,
+      'Starting 120⁴ database populate…'
+    );
     if (!ok) return;
     setUseDatabaseEvaluator(true);
     refreshFromGame(game);
@@ -577,14 +569,11 @@ const App = () => {
     }
     setBusy(true);
     try {
-      const before = (game as any).round_points?.() ?? roundPoints;
+      const before = game.round_points();
       const proposed = before + 1;
-      const ok = (game as any).propose_raise?.(0);
+      const ok = game.propose_raise(0);
       if (!ok) {
-        setLog((prev) => [
-          ...prev,
-          `Team 1 cannot raise right now.`,
-        ]);
+        setLog((prev) => [...prev, `Team 1 cannot raise right now.`]);
         setBusy(false);
         return;
       }
@@ -593,10 +582,7 @@ const App = () => {
         `Team 1 proposes to raise the round to ${proposed} — Team 2 is thinking…`,
       ]);
       await sleep(700);
-      const outcome = ((game as any).auto_respond_raise?.() ?? null) as
-        | null
-        | { accepted: true; new_value: number; proposing_team?: number }
-        | { accepted: false; winning_team: number; points: number; ended: boolean };
+      const outcome = game.auto_respond_raise();
       if (!outcome) {
         setBusy(false);
         return;
@@ -626,10 +612,10 @@ const App = () => {
     }
   }
 
-  async function onConcede() {
+  function onConcede() {
     if (!game || busy || gameOver) return;
     if (decidedFor !== null) return;
-    const ok = (game as any).concede_round?.(0);
+    const ok = game.concede_round(0);
     if (!ok) return;
     setDecidedFor(1);
     setLog((prev) => [
@@ -655,7 +641,11 @@ const App = () => {
         <div className="player-label">
           P{playerIdx + 1}
           <span className="player-team-tag">{team === 0 ? 'T1' : 'T2'}</span>
-          {isCurrent ? <span className="current-turn-dot" aria-hidden="true">●</span> : null}
+          {isCurrent ? (
+            <span className="current-turn-dot" aria-hidden="true">
+              ●
+            </span>
+          ) : null}
         </div>
         <div className="player-cards">
           {Array.from({ length: CARDS_PER_HAND }).map((_, i) => {
@@ -665,7 +655,9 @@ const App = () => {
             if (!showAllHands) {
               return (
                 <div key={i} className="opp-slot">
-                  {i < size ? <CardView suit="Hearts" rank="" faceDown /> : null}
+                  {i < size ? (
+                    <CardView suit="Hearts" rank="" faceDown />
+                  ) : null}
                 </div>
               );
             }
@@ -682,7 +674,9 @@ const App = () => {
             return (
               <div key={i} className="opp-slot revealed">
                 <CardView suit={c.suit} rank={displayRank(c.rank)} />
-                <div className="card-rate">{rate !== null ? `${rate}%` : ''}</div>
+                <div className="card-rate">
+                  {rate !== null ? `${rate}%` : ''}
+                </div>
               </div>
             );
           })}
@@ -697,7 +691,7 @@ const App = () => {
       <p className="info" data-testid="round-info">
         Round <strong>{roundNumber}</strong>
         &nbsp;·&nbsp; Dealer: <strong>P{dealer + 1}</strong>
-        {(humanIsSeer || showDebug) ? (
+        {humanIsSeer || showDebug ? (
           <>
             &nbsp;·&nbsp; Trump:{' '}
             <strong data-testid="trump-display">{trump ?? '-'}</strong>
@@ -709,7 +703,8 @@ const App = () => {
           </>
         ) : (
           <span className="hidden-trump-hint">
-            &nbsp;·&nbsp; <em>Trump & Striker hidden — you're not a seer this round</em>
+            &nbsp;·&nbsp;{' '}
+            <em>Trump &amp; Striker hidden — you are not a seer this round</em>
           </span>
         )}
       </p>
@@ -771,7 +766,8 @@ const App = () => {
             />
           </div>
           <span className="db-progress-label">
-            Loading 120⁴ database… <strong>{Math.round(dbProgress * 100)}%</strong>
+            Loading 120⁴ database…{' '}
+            <strong>{Math.round(dbProgress * 100)}%</strong>
           </span>
         </div>
       )}
@@ -795,10 +791,10 @@ const App = () => {
             scores[0] >= raiseLockoutScore
               ? `Team 1 has reached ${raiseLockoutScore} points and may not propose raises any more`
               : lastRaiseBy === 0
-              ? 'Team 2 must raise first (alternation rule)'
-              : decidedFor !== null
-              ? 'Round outcome is already decided'
-              : ''
+                ? 'Team 2 must raise first (alternation rule)'
+                : decidedFor !== null
+                  ? 'Round outcome is already decided'
+                  : ''
           }
           data-testid="raise-button"
         >
@@ -829,17 +825,19 @@ const App = () => {
       {decidedFor !== null && (
         <p className="round-decided" data-testid="round-decided">
           Round outcome locked in: Team {decidedFor + 1} will take{' '}
-          <strong>{roundPoints}</strong> point{roundPoints === 1 ? '' : 's'} when
-          all cards are played.
+          <strong>{roundPoints}</strong> point{roundPoints === 1 ? '' : 's'}{' '}
+          when all cards are played.
         </p>
       )}
       {gameOver && (
         <p className="game-over">
-          Game over. Team {gameOver.winner} wins {gameOver.final[0]}–{gameOver.final[1]}.
+          Game over. Team {gameOver.winner} wins {gameOver.final[0]}–
+          {gameOver.final[1]}.
         </p>
       )}
       <p className="info team-legend" data-testid="team-info">
-        <span className="team-1-chip">Team 1</span>: You (P1) &amp; P3 (across) &nbsp;·&nbsp;
+        <span className="team-1-chip">Team 1</span>: You (P1) &amp; P3 (across)
+        &nbsp;·&nbsp;
         <span className="team-2-chip">Team 2</span>: P2 &amp; P4 (opponents)
       </p>
       <div className="table">
@@ -861,13 +859,13 @@ const App = () => {
             const rs = t && r ? roundScore(t.card, r) : null;
             const ts = t && r ? trickScore(t.card, i, trick, r) : null;
             return (
-              <div
-                key={i}
-                className={`trick-slot${isWinner ? ' winner' : ''}`}
-              >
+              <div key={i} className={`trick-slot${isWinner ? ' winner' : ''}`}>
                 {t ? (
                   <>
-                    <CardView suit={t.card.suit} rank={displayRank(t.card.rank)} />
+                    <CardView
+                      suit={t.card.suit}
+                      rank={displayRank(t.card.rank)}
+                    />
                     <div className={`trick-label team-${(t.player % 2) + 1}`}>
                       P{t.player + 1}
                       <span className="trick-team-tag">
@@ -898,7 +896,8 @@ const App = () => {
           {slots.map((c, slotIdx) => {
             const e = c ? evalBySlot.get(slotIdx) : undefined;
             const rate = e ? Math.round(e.rate * 100) : null;
-            const selectable = !!c && allowedSlots.has(slotIdx) && !busy && !gameOver;
+            const selectable =
+              !!c && allowedSlots.has(slotIdx) && !busy && !gameOver;
             return (
               <div key={slotIdx} className="hand-slot">
                 {c ? (
@@ -914,20 +913,24 @@ const App = () => {
                 <div className="card-rate">
                   {rate !== null && allowedSlots.has(slotIdx) ? `${rate}%` : ''}
                 </div>
-                {showDebug && c && rechte && (() => {
-                  const me = evalBySlot.get(slotIdx);
-                  return (
-                    <div className="card-debug" data-testid="hand-debug">
-                      R:{roundScore(c, rechte)}
-                      {me ? (
-                        <>
-                          <br />W:{me.wins} L:{me.total - me.wins}
-                          {me.illegal > 0 ? <> I:{me.illegal}</> : null}
-                        </>
-                      ) : null}
-                    </div>
-                  );
-                })()}
+                {showDebug &&
+                  c &&
+                  rechte &&
+                  (() => {
+                    const me = evalBySlot.get(slotIdx);
+                    return (
+                      <div className="card-debug" data-testid="hand-debug">
+                        R:{roundScore(c, rechte)}
+                        {me ? (
+                          <>
+                            <br />
+                            W:{me.wins} L:{me.total - me.wins}
+                            {me.illegal > 0 ? <> I:{me.illegal}</> : null}
+                          </>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
               </div>
             );
           })}

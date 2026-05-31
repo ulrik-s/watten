@@ -22,14 +22,18 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install cargo-llvm-cov
+      - name: Install cargo tools
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-llvm-cov
+          tool: cargo-llvm-cov,cargo-deny,cargo-machete
       - name: rustfmt
         run: cargo fmt -- --check
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings
+      - name: cargo-deny (advisories, licenses, bans, sources)
+        run: cargo deny check
+      - name: cargo-machete (unused dependencies)
+        run: cargo machete
       - name: Tests + coverage (lcov)
         run: cargo llvm-cov --workspace --lcov --output-path coverage-rust.lcov
       - name: Tests + coverage (HTML)
@@ -60,6 +64,18 @@ jobs:
       - name: Install JS deps
         working-directory: frontend
         run: npm ci
+      - name: Build wasm (web target, for type info)
+        working-directory: frontend
+        run: npm run build:wasm
+      - name: ESLint
+        working-directory: frontend
+        run: npm run lint
+      - name: Prettier check
+        working-directory: frontend
+        run: npm run format:check
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
       - name: Vitest with coverage
         working-directory: frontend
         run: npm run coverage

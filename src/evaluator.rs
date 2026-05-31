@@ -221,11 +221,13 @@ impl DatabaseEvaluator {
         }
     }
 
+    #[must_use]
     pub fn with_perm_range(mut self, range: Vec<usize>) -> Self {
         self.perm_range = Some(range);
         self
     }
 
+    #[must_use]
     pub fn with_workers(mut self, workers: usize) -> Self {
         self.workers = workers.max(1);
         self
@@ -347,7 +349,7 @@ impl MoveEvaluator for DatabaseEvaluator {
                 if let Some(ref allowed) = self.perm_range {
                     *list = allowed
                         .iter()
-                        .cloned()
+                        .copied()
                         .filter(|&v| v >= s && v < e)
                         .collect();
                 } else {
@@ -360,12 +362,11 @@ impl MoveEvaluator for DatabaseEvaluator {
             let wins = counts[win_result];
             let losses = counts[loss_result];
             let illegal = counts[GameResult::RuleViolation as usize];
-            let hi =
-                match current_hand_idx_for_orig(ctx.orig_hands, ctx.player, orig, ctx.current_hand)
-                {
-                    Some(i) => i,
-                    None => continue,
-                };
+            let Some(hi) =
+                current_hand_idx_for_orig(ctx.orig_hands, ctx.player, orig, ctx.current_hand)
+            else {
+                continue;
+            };
             out.push(MoveEvaluation {
                 hand_idx: hi,
                 wins,
@@ -412,9 +413,8 @@ impl MoveEvaluator for DatabaseEvaluator {
 
     fn step_chunked_populate(&mut self, batch: usize) -> (usize, usize) {
         // Pull the state out so we can mutate `self.db` alongside it.
-        let mut state = match self.populate.take() {
-            Some(s) => s,
-            None => return (0, 0),
+        let Some(mut state) = self.populate.take() else {
+            return (0, 0);
         };
         let end = state.total.min(state.progress.saturating_add(batch));
         let len = state.indices.len();

@@ -1,6 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
 
-const HAND_CARD = '.hand-slot .card';
 const SELECTABLE = '.hand-slot .card.selectable';
 
 async function waitForReady(page: Page) {
@@ -8,7 +7,10 @@ async function waitForReady(page: Page) {
   // even though concede/fold now play the round out to completion.
   await page.goto('/?fast=1');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Watten');
-  await page.locator(SELECTABLE).first().waitFor({ state: 'visible', timeout: 30000 });
+  await page
+    .locator(SELECTABLE)
+    .first()
+    .waitFor({ state: 'visible', timeout: 30000 });
 }
 
 async function readRoundNumberFromUI(page: Page): Promise<number> {
@@ -47,19 +49,26 @@ async function clickHandToEnd(page: Page, maxClicks = 30) {
 }
 
 async function readRoundPoints(page: Page): Promise<number> {
-  const text = await page.locator('p', { hasText: /Round worth:/ }).first().innerText();
+  const text = await page
+    .locator('p', { hasText: /Round worth:/ })
+    .first()
+    .innerText();
   const m = text.match(/Round worth:\s*(\d+)/);
   if (!m) throw new Error('Cannot find round-worth: ' + text);
   return parseInt(m[1], 10);
 }
 
-async function readScores(page: Page): Promise<{ team1: number; team2: number; target: number }> {
+async function readScores(
+  page: Page
+): Promise<{ team1: number; team2: number; target: number }> {
   const text = await page
     .locator('p')
     .filter({ hasText: /Team 1/ })
     .first()
     .innerText();
-  const m = text.match(/Team\s*1\s*(\d+)\s*[—-]\s*Team\s*2\s*(\d+)\s*\(to\s*(\d+)\)/);
+  const m = text.match(
+    /Team\s*1\s*(\d+)\s*[—-]\s*Team\s*2\s*(\d+)\s*\(to\s*(\d+)\)/
+  );
   if (!m) throw new Error('Cannot parse scores: ' + text);
   return {
     team1: parseInt(m[1], 10),
@@ -69,27 +78,45 @@ async function readScores(page: Page): Promise<{ team1: number; team2: number; t
 }
 
 test.describe('widgets', () => {
-  test('Raise button proposes a raise that Team 2 either accepts or folds', async ({ page }) => {
+  test('Raise button proposes a raise that Team 2 either accepts or folds', async ({
+    page,
+  }) => {
     test.setTimeout(60000);
     await waitForReady(page);
     const beforePts = await readRoundPoints(page);
     const beforeScores = await (async () => {
-      const text = await page.locator('p').filter({ hasText: /Team 1/ }).first().innerText();
+      const text = await page
+        .locator('p')
+        .filter({ hasText: /Team 1/ })
+        .first()
+        .innerText();
       const m = text.match(/Team\s*1\s*(\d+)\s*[—-]\s*Team\s*2\s*(\d+)/);
       return { team1: parseInt(m![1], 10), team2: parseInt(m![2], 10) };
     })();
     await page.getByRole('button', { name: /Raise/ }).click();
     // Always log the proposal first.
-    await expect(page.locator('.log').getByText(/Team 1 proposes to raise/)).toBeVisible();
+    await expect(
+      page.locator('.log').getByText(/Team 1 proposes to raise/)
+    ).toBeVisible();
     // Either accepted (round-worth bumps) or folded (game-over banner OR
     // round resets to 2 and Team 1's score goes up by the pre-raise value).
     await expect
       .poll(
         async () => {
-          if ((await page.locator('.log').getByText(/Team 2 accepts/).count()) > 0) {
+          if (
+            (await page
+              .locator('.log')
+              .getByText(/Team 2 accepts/)
+              .count()) > 0
+          ) {
             return 'accepted';
           }
-          if ((await page.locator('.log').getByText(/Team 2 folds/).count()) > 0) {
+          if (
+            (await page
+              .locator('.log')
+              .getByText(/Team 2 folds/)
+              .count()) > 0
+          ) {
             return 'folded';
           }
           return null;
@@ -97,7 +124,12 @@ test.describe('widgets', () => {
         { timeout: 8000 }
       )
       .not.toBeNull();
-    if ((await page.locator('.log').getByText(/Team 2 accepts/).count()) > 0) {
+    if (
+      (await page
+        .locator('.log')
+        .getByText(/Team 2 accepts/)
+        .count()) > 0
+    ) {
       expect(await readRoundPoints(page)).toBe(beforePts + 1);
     } else {
       // Folded: Team 1 is locked in. The user must still play out the
@@ -121,13 +153,17 @@ test.describe('widgets', () => {
     }
   });
 
-  test('Concede locks in Team 2; user plays out remaining cards; scores then credit Team 2', async ({ page }) => {
+  test('Concede locks in Team 2; user plays out remaining cards; scores then credit Team 2', async ({
+    page,
+  }) => {
     test.setTimeout(120000);
     await waitForReady(page);
     const before = await readScores(page);
     await page.getByRole('button', { name: /Concede/ }).click();
     // The round-decided indicator should appear, and the user keeps clicking.
-    await expect(page.getByTestId('round-decided')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId('round-decided')).toBeVisible({
+      timeout: 5000,
+    });
     await clickHandToEnd(page);
     // Score only lands at finish_round, after the user has played out their hand.
     await expect
@@ -135,7 +171,9 @@ test.describe('widgets', () => {
       .toBeGreaterThanOrEqual(before.team2 + 2);
   });
 
-  test('Clicking a hand card produces a log entry for the human play', async ({ page }) => {
+  test('Clicking a hand card produces a log entry for the human play', async ({
+    page,
+  }) => {
     test.setTimeout(60000);
     await waitForReady(page);
     const beforeLogLines = await page.locator('.log > div').count();
@@ -143,10 +181,17 @@ test.describe('widgets', () => {
     await expect
       .poll(() => page.locator('.log > div').count(), { timeout: 10000 })
       .toBeGreaterThan(beforeLogLines);
-    await expect(page.locator('.log').getByText(/Player \d plays /).first()).toBeVisible();
+    await expect(
+      page
+        .locator('.log')
+        .getByText(/Player \d plays /)
+        .first()
+    ).toBeVisible();
   });
 
-  test('Clicked card disappears from its slot (and other slots stay put)', async ({ page }) => {
+  test('Clicked card disappears from its slot (and other slots stay put)', async ({
+    page,
+  }) => {
     test.setTimeout(60000);
     await waitForReady(page);
     // Find the first selectable slot index and capture every slot's
@@ -169,7 +214,9 @@ test.describe('widgets', () => {
       // suit is the <img alt> on a real card; fall back to src path.
       const suitSrc = (await card.locator('img').getAttribute('src')) ?? '';
       before.push({ filled: true, key: `${rank}-${suitSrc}` });
-      const isSel = await card.evaluate((el) => el.classList.contains('selectable'));
+      const isSel = await card.evaluate((el) =>
+        el.classList.contains('selectable')
+      );
       if (isSel && firstSelectableSlot < 0) firstSelectableSlot = i;
     }
     expect(firstSelectableSlot).toBeGreaterThanOrEqual(0);
@@ -208,7 +255,9 @@ test.describe('widgets', () => {
     expect(anyPercent).toBe(true);
   });
 
-  test('Tricks-this-round counter increments when a trick completes', async ({ page }) => {
+  test('Tricks-this-round counter increments when a trick completes', async ({
+    page,
+  }) => {
     test.setTimeout(60000);
     await waitForReady(page);
     // Before any human play the bots have not completed a trick yet, so the
@@ -219,15 +268,20 @@ test.describe('widgets', () => {
     // Click a card → trick completes → exactly one team's count goes up.
     await page.locator(SELECTABLE).first().click();
     await expect
-      .poll(async () => {
-        const text = await counter.innerText();
-        const m = text.match(/Team\s*1\s*(\d+)\s*·\s*Team\s*2\s*(\d+)/);
-        return m ? parseInt(m[1], 10) + parseInt(m[2], 10) : 0;
-      }, { timeout: 10000 })
+      .poll(
+        async () => {
+          const text = await counter.innerText();
+          const m = text.match(/Team\s*1\s*(\d+)\s*·\s*Team\s*2\s*(\d+)/);
+          return m ? parseInt(m[1], 10) + parseInt(m[2], 10) : 0;
+        },
+        { timeout: 10000 }
+      )
       .toBeGreaterThanOrEqual(1);
   });
 
-  test('Accepted raise pays the round at its raised value (not pre-raise)', async ({ page }) => {
+  test('Accepted raise pays the round at its raised value (not pre-raise)', async ({
+    page,
+  }) => {
     test.setTimeout(180000);
     await waitForReady(page);
 
@@ -309,7 +363,9 @@ test.describe('widgets', () => {
     throw new Error('Team 2 never accepted a raise in 12 attempts');
   });
 
-  test('Trump and striker are hidden on non-seer rounds and revealed by Show scores', async ({ page }) => {
+  test('Trump and striker are hidden on non-seer rounds and revealed by Show scores', async ({
+    page,
+  }) => {
     test.setTimeout(60000);
     await waitForReady(page);
 
@@ -326,7 +382,9 @@ test.describe('widgets', () => {
     // NOT a seer this round. Trump/striker must be hidden.
     await page.getByRole('button', { name: /Concede/ }).click();
     await clickHandToEnd(page);
-    await expect.poll(() => readRoundNumberFromUI(page), { timeout: 30000 }).toBe(2);
+    await expect
+      .poll(() => readRoundNumberFromUI(page), { timeout: 30000 })
+      .toBe(2);
     await expect(info).toContainText(/Dealer:\s*P2/);
     await expect(info).not.toContainText(/Trump:/);
     await expect(page.locator('.hidden-trump-hint')).toBeVisible();
@@ -338,7 +396,9 @@ test.describe('widgets', () => {
     await expect(info).toContainText(/\(debug\)/);
   });
 
-  test('Teams P1+P3 vs P2+P4 are tagged in the UI; seeing players are split', async ({ page }) => {
+  test('Teams P1+P3 vs P2+P4 are tagged in the UI; seeing players are split', async ({
+    page,
+  }) => {
     test.setTimeout(20000);
     await waitForReady(page);
     // Legend with both chips visible.
@@ -358,7 +418,9 @@ test.describe('widgets', () => {
     await expect(p4).toContainText('T2');
   });
 
-  test('120^4 database toggle is rendered and shows a progress bar when clicked', async ({ page }) => {
+  test('120^4 database toggle is rendered and shows a progress bar when clicked', async ({
+    page,
+  }) => {
     test.setTimeout(60000);
     await waitForReady(page);
     const dbToggle = page.getByTestId('toggle-db-evaluator');
@@ -386,7 +448,9 @@ test.describe('widgets', () => {
     expect(Math.max(first, second)).toBeGreaterThan(0);
   });
 
-  test('Show-scores debug toggle reveals round/trick scores per card', async ({ page }) => {
+  test('Show-scores debug toggle reveals round/trick scores per card', async ({
+    page,
+  }) => {
     test.setTimeout(60000);
     await waitForReady(page);
     // Off by default — no debug badges.
@@ -399,18 +463,25 @@ test.describe('widgets', () => {
     await expect(handDebug).toContainText('R:');
     // After playing a card, trick slots show R:/T: badges too.
     await page.locator(SELECTABLE).first().click();
-    await expect(page.getByTestId('trick-debug').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId('trick-debug').first()).toBeVisible({
+      timeout: 5000,
+    });
     await expect(page.getByTestId('trick-debug').first()).toContainText('R:');
     await expect(page.getByTestId('trick-debug').first()).toContainText('T:');
   });
 
-  test('Trick winner banner matches the strongest card on the table', async ({ page }) => {
+  test('Trick winner banner matches the strongest card on the table', async ({
+    page,
+  }) => {
     test.setTimeout(60000);
     // Run this one at normal speed so the winner highlight is on screen long
     // enough to inspect; the other tests use ?fast=1.
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Watten');
-    await page.locator(SELECTABLE).first().waitFor({ state: 'visible', timeout: 30000 });
+    await page
+      .locator(SELECTABLE)
+      .first()
+      .waitFor({ state: 'visible', timeout: 30000 });
 
     // Trump/striker are now hidden on non-seer rounds. Enable Show scores so
     // they're surfaced regardless of seer status, so this test can read them
@@ -418,10 +489,16 @@ test.describe('widgets', () => {
     await page.getByTestId('show-debug').check();
 
     await page.locator(SELECTABLE).first().click();
-    await expect(page.getByTestId('trick-winner')).toBeVisible({ timeout: 12000 });
+    await expect(page.getByTestId('trick-winner')).toBeVisible({
+      timeout: 12000,
+    });
 
-    const trumpSuit = (await page.getByTestId('trump-display').innerText()).trim();
-    const strikerDisplay = (await page.getByTestId('striker-display').innerText()).trim();
+    const trumpSuit = (
+      await page.getByTestId('trump-display').innerText()
+    ).trim();
+    const strikerDisplay = (
+      await page.getByTestId('striker-display').innerText()
+    ).trim();
     expect(trumpSuit).not.toBe('-');
     expect(strikerDisplay).not.toBe('-');
 
@@ -437,7 +514,9 @@ test.describe('widgets', () => {
       })
     );
     // Guard: make sure we captured a full trick.
-    expect(trickCards.filter((c) => c.rank !== '' && c.suit !== '').length).toBe(4);
+    expect(
+      trickCards.filter((c) => c.rank !== '' && c.suit !== '').length
+    ).toBe(4);
 
     // Independently compute the expected winner using the user's spec:
     //   round_score = (trump_suit ? 100 : 0) + (striker_rank ? 200 : 0)
@@ -446,22 +525,33 @@ test.describe('widgets', () => {
     //                 rv      otherwise
     // Strict > with earlier-wins-ties.
     const RANK_DISPLAY_TO_VALUE: Record<string, number> = {
-      '7': 1, '8': 2, '9': 3, '10': 4,
-      Unter: 5, Ober: 6, King: 7, Ace: 8, Weli: 9,
+      '7': 1,
+      '8': 2,
+      '9': 3,
+      '10': 4,
+      Unter: 5,
+      Ober: 6,
+      King: 7,
+      Ace: 8,
+      Weli: 9,
     };
     const leadSuit = trickCards[0].suit;
-    function score(c: { rank: string; suit: string }, pos: number, all: typeof trickCards): number {
+    function score(
+      c: { rank: string; suit: string },
+      pos: number,
+      all: typeof trickCards
+    ): number {
       let round = 0;
       if (c.suit === trumpSuit) round += 100;
       if (c.rank === strikerDisplay) round += 200;
-      let trick: number;
       if (c.rank === strikerDisplay) {
         let earlierStriker = false;
-        for (let k = 0; k < pos; k++) if (all[k].rank === strikerDisplay) earlierStriker = true;
+        for (let k = 0; k < pos; k++)
+          if (all[k].rank === strikerDisplay) earlierStriker = true;
         if (earlierStriker) return round - 400;
       }
       const rv = RANK_DISPLAY_TO_VALUE[c.rank] ?? 0;
-      trick = c.suit === leadSuit ? rv + 20 : rv;
+      const trick = c.suit === leadSuit ? rv + 20 : rv;
       return round + trick;
     }
     let expectedWinner = 0;
@@ -496,7 +586,9 @@ test.describe('widgets', () => {
       // Wait until the next round's deal is ready (concede button re-enabled),
       // or the game ends.
       await Promise.race([
-        page.locator('.game-over').waitFor({ state: 'visible', timeout: 10000 }),
+        page
+          .locator('.game-over')
+          .waitFor({ state: 'visible', timeout: 10000 }),
         concede
           .elementHandle()
           .then((h) =>

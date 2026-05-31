@@ -68,16 +68,15 @@ fn perm_prefix_range_indexes_into_all_hand_orders_correctly() {
     for first in 0..5 {
         let (s, e) = perm_prefix_range(&[first]);
         // Length of the range is always 4! = 24.
-        assert_eq!(e - s, 24, "range size for prefix [{}]", first);
+        assert_eq!(e - s, 24, "range size for prefix [{first}]");
         // Every index inside the range must point to a permutation
         // whose first element is `first`.
         for (offset, perm) in perms[s..e].iter().enumerate() {
             let i = s + offset;
             assert_eq!(
                 perm[0], first,
-                "perms[{}] = {:?} should start with {}; \
-                 perm_prefix_range([{}]) returned [{}, {})",
-                i, perm, first, first, s, e
+                "perms[{i}] = {perm:?} should start with {first}; \
+                 perm_prefix_range([{first}]) returned [{s}, {e})"
             );
         }
         // Conversely, every permutation that DOES start with `first`
@@ -86,14 +85,8 @@ fn perm_prefix_range_indexes_into_all_hand_orders_correctly() {
             if p[0] == first {
                 assert!(
                     i >= s && i < e,
-                    "perms[{}] = {:?} starts with {} but lies outside \
-                     perm_prefix_range([{}]) = [{}, {})",
-                    i,
-                    p,
-                    first,
-                    first,
-                    s,
-                    e
+                    "perms[{i}] = {p:?} starts with {first} but lies outside \
+                     perm_prefix_range([{first}]) = [{s}, {e})"
                 );
             }
         }
@@ -107,7 +100,7 @@ fn perm_prefix_range_two_element_prefix_indexes_correctly() {
     // Try a few representative prefixes covering different shapes.
     for &(a, b) in &[(0usize, 1usize), (2, 0), (4, 3), (1, 4)] {
         let (s, e) = perm_prefix_range(&[a, b]);
-        assert_eq!(e - s, 6, "range size for prefix [{}, {}]", a, b);
+        assert_eq!(e - s, 6, "range size for prefix [{a}, {b}]");
         for perm in &perms[s..e] {
             assert_eq!(perm[0], a);
             assert_eq!(perm[1], b);
@@ -116,12 +109,8 @@ fn perm_prefix_range_two_element_prefix_indexes_correctly() {
             if p[0] == a && p[1] == b {
                 assert!(
                     i >= s && i < e,
-                    "perms[{}] = {:?} starts with [{}, {}] but is outside \
-                     perm_prefix_range result",
-                    i,
-                    p,
-                    a,
-                    b
+                    "perms[{i}] = {p:?} starts with [{a}, {b}] but is outside \
+                     perm_prefix_range result"
                 );
             }
         }
@@ -213,7 +202,7 @@ fn database_evaluator_counts_match_a_brute_force_count() {
         let e = evals
             .iter()
             .find(|e| e.hand_idx == orig)
-            .unwrap_or_else(|| panic!("no eval for orig idx {}", orig));
+            .unwrap_or_else(|| panic!("no eval for orig idx {orig}"));
         assert_eq!(
             e.wins, wins,
             "wins mismatch for candidate orig={}: evaluator={}, brute-force={}",
@@ -222,13 +211,11 @@ fn database_evaluator_counts_match_a_brute_force_count() {
         assert_eq!(
             e.total,
             wins + losses,
-            "total (wins+losses) mismatch for candidate orig={}",
-            orig
+            "total (wins+losses) mismatch for candidate orig={orig}"
         );
         assert_eq!(
             e.illegal, illegal,
-            "illegal mismatch for candidate orig={}",
-            orig
+            "illegal mismatch for candidate orig={orig}"
         );
     }
 }

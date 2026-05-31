@@ -28,7 +28,7 @@ You need:
 - Rust (stable) + the `wasm32-unknown-unknown` target
   (`rustup target add wasm32-unknown-unknown`)
 - [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) (`cargo install wasm-pack`)
-- Node.js 18+
+- Node.js 20+ (CI builds on Node 20)
 
 Then, from the repository root:
 
@@ -69,6 +69,45 @@ cd frontend
 npx playwright install   # first time only
 npm run test:e2e
 ```
+
+### Linting & formatting
+
+The repo is linted and formatted by a layered toolchain, all gated in CI:
+
+| Area  | Tools |
+| ----- | ----- |
+| Rust  | `rustfmt`, `clippy` (with `pedantic`), `cargo-deny` (advisories/licenses/bans/sources), `cargo-machete` (unused deps) |
+| Front | ESLint (typescript-eslint type-checked, react, react-hooks, react-refresh, jsx-a11y), Prettier, `tsc --noEmit` |
+| Repo  | `.editorconfig`, [lefthook](https://lefthook.dev) git hooks |
+
+Run everything the way CI does, from the repository root:
+
+```bash
+make lint            # all linters (Rust + JS), no changes made
+make fmt             # auto-format Rust (cargo fmt) + JS (prettier)
+make audit           # cargo deny check + cargo machete
+```
+
+The lint config lives in `Cargo.toml` (`[lints]`), `deny.toml`,
+`frontend/eslint.config.js`, and `frontend/.prettierrc.json`. The Rust
+supply-chain tools install with:
+
+```bash
+cargo install cargo-deny cargo-machete   # or download prebuilt binaries
+```
+
+#### Git hooks
+
+[lefthook](https://lefthook.dev) runs the fast checks before each commit
+(rustfmt, clippy, ESLint, Prettier) and the test suite before each push. It
+installs automatically via the root `npm install` (`prepare` script); to wire
+it up manually:
+
+```bash
+make hooks           # npx lefthook install
+```
+
+Hook behaviour is defined in [`lefthook.yml`](lefthook.yml).
 
 ### Code coverage
 

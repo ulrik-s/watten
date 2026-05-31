@@ -1,4 +1,5 @@
 use rand::seq::SliceRandom;
+use std::fmt::Write as _;
 use std::io::{self, Write};
 
 fn format_hand(hand: &[Card], allowed: &[usize], rates: Option<&[f64]>) -> String {
@@ -10,15 +11,9 @@ fn format_hand(hand: &[Card], allowed: &[usize], rates: Option<&[f64]>) -> Strin
             " (not allowed)"
         };
         if let Some(r) = rates {
-            out.push_str(&format!(
-                "  {}: {} {:.1}%{}\n",
-                i + 1,
-                c,
-                r[i] * 100.0,
-                mark
-            ));
+            let _ = writeln!(out, "  {}: {} {:.1}%{}", i + 1, c, r[i] * 100.0, mark);
         } else {
-            out.push_str(&format!("  {}: {}{}\n", i + 1, c, mark));
+            let _ = writeln!(out, "  {}: {}{}", i + 1, c, mark);
         }
     }
     out

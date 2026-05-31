@@ -1,9 +1,10 @@
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   background: #1f4d1f;
   color: #f0f0f0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   min-height: 100vh;
 }
 
@@ -117,8 +118,14 @@ h1 {
 }
 
 @keyframes pop {
-  from { transform: scale(0.92); opacity: 0; }
-  to   { transform: scale(1);    opacity: 1; }
+  from {
+    transform: scale(0.92);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 /* Stable 3-column board so opponent hands and the trick area never push
@@ -137,12 +144,26 @@ h1 {
   margin: 18px 0;
 }
 
-.table .p2 { grid-area: p2; }
-.table .p3 { grid-area: p3; justify-self: center; }
-.table .p4 { grid-area: p4; }
-.table .center { grid-area: center; }
-.table .hand { grid-area: hand; }
-.table .trick-banner-wrap { grid-area: banner; min-height: 28px; }
+.table .p2 {
+  grid-area: p2;
+}
+.table .p3 {
+  grid-area: p3;
+  justify-self: center;
+}
+.table .p4 {
+  grid-area: p4;
+}
+.table .center {
+  grid-area: center;
+}
+.table .hand {
+  grid-area: hand;
+}
+.table .trick-banner-wrap {
+  grid-area: banner;
+  min-height: 28px;
+}
 
 .player {
   display: flex;
@@ -253,8 +274,13 @@ h1 {
   animation: pulse-dot 1.4s ease-in-out infinite;
 }
 @keyframes pulse-dot {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* Trick area: always 4 slots wide so the center never resizes. */
@@ -281,7 +307,9 @@ h1 {
 }
 
 .trick-slot.winner .card {
-  box-shadow: 0 0 0 3px #ffe066, 0 0 18px rgba(255, 224, 102, 0.6);
+  box-shadow:
+    0 0 0 3px #ffe066,
+    0 0 18px rgba(255, 224, 102, 0.6);
   transform: translateY(-3px) scale(1.04);
 }
 
@@ -348,7 +376,9 @@ h1 {
   font-size: 11px;
   position: relative;
   user-select: none;
-  transition: transform 0.18s ease-out, box-shadow 0.18s ease-out;
+  transition:
+    transform 0.18s ease-out,
+    box-shadow 0.18s ease-out;
 }
 
 .card .rank {
@@ -365,7 +395,13 @@ h1 {
 .card .back {
   width: 100%;
   height: 100%;
-  background: repeating-linear-gradient(45deg, #345, #345 5px, #678 5px, #678 10px);
+  background: repeating-linear-gradient(
+    45deg,
+    #345,
+    #345 5px,
+    #678 5px,
+    #678 10px
+  );
   border-radius: 5px;
 }
 
@@ -381,12 +417,20 @@ h1 {
 
 .card.selectable:hover {
   transform: translateY(-4px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35), 0 0 0 2px #ffe066;
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.35),
+    0 0 0 2px #ffe066;
 }
 
 @keyframes cardIn {
-  from { transform: translateY(-12px) scale(0.85); opacity: 0; }
-  to   { transform: translateY(0)     scale(1);    opacity: 1; }
+  from {
+    transform: translateY(-12px) scale(0.85);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
 }
 
 .actions {
@@ -403,7 +447,9 @@ h1 {
   border-radius: 4px;
   cursor: pointer;
   font-size: 14px;
-  transition: background 0.15s ease, transform 0.1s ease;
+  transition:
+    background 0.15s ease,
+    transform 0.1s ease;
 }
 
 .actions button:disabled {
@@ -423,7 +469,7 @@ h1 {
   margin-top: 12px;
   font-size: 12px;
   opacity: 0.85;
-  height: 200px;             /* fixed height so log growth doesn't push */
+  height: 200px; /* fixed height so log growth doesn't push */
   overflow-y: auto;
   background: rgba(0, 0, 0, 0.2);
   padding: 8px;

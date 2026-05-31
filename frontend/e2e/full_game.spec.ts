@@ -5,12 +5,21 @@ const SELECTABLE = '.hand-slot .card.selectable';
 async function waitForReady(page: Page) {
   await page.goto('/?fast=1');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Watten');
-  await page.locator(SELECTABLE).first().waitFor({ state: 'visible', timeout: 30000 });
+  await page
+    .locator(SELECTABLE)
+    .first()
+    .waitFor({ state: 'visible', timeout: 30000 });
 }
 
 async function readScores(page: Page) {
-  const text = await page.locator('p').filter({ hasText: /Team 1/ }).first().innerText();
-  const m = text.match(/Team\s*1\s*(\d+)\s*[—-]\s*Team\s*2\s*(\d+)\s*\(to\s*(\d+)\)/);
+  const text = await page
+    .locator('p')
+    .filter({ hasText: /Team 1/ })
+    .first()
+    .innerText();
+  const m = text.match(
+    /Team\s*1\s*(\d+)\s*[—-]\s*Team\s*2\s*(\d+)\s*\(to\s*(\d+)\)/
+  );
   if (!m) throw new Error('Cannot parse scores: ' + text);
   return {
     team1: parseInt(m[1], 10),
@@ -20,17 +29,35 @@ async function readScores(page: Page) {
 }
 
 async function readRoundPoints(page: Page) {
-  const text = await page.locator('p', { hasText: /Round worth:/ }).first().innerText();
+  const text = await page
+    .locator('p', { hasText: /Round worth:/ })
+    .first()
+    .innerText();
   const m = text.match(/Round worth:\s*(\d+)/);
   if (!m) throw new Error('Cannot find round-worth: ' + text);
   return parseInt(m[1], 10);
 }
 
-async function waitForRaiseResolution(page: Page, timeoutMs = 10000): Promise<'accepted' | 'folded'> {
+async function waitForRaiseResolution(
+  page: Page,
+  timeoutMs = 10000
+): Promise<'accepted' | 'folded'> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if ((await page.locator('.log').getByText(/Team 2 accepts/).count()) > 0) return 'accepted';
-    if ((await page.locator('.log').getByText(/Team 2 folds/).count()) > 0) return 'folded';
+    if (
+      (await page
+        .locator('.log')
+        .getByText(/Team 2 accepts/)
+        .count()) > 0
+    )
+      return 'accepted';
+    if (
+      (await page
+        .locator('.log')
+        .getByText(/Team 2 folds/)
+        .count()) > 0
+    )
+      return 'folded';
     await page.waitForTimeout(150);
   }
   throw new Error('timed out waiting for raise resolution');
@@ -50,7 +77,9 @@ async function clickThroughHand(page: Page, maxClicks = 25) {
   }
 }
 
-test('full game using card clicks, raise-with-response, concede, and the trick-winner UI', async ({ page }) => {
+test('full game using card clicks, raise-with-response, concede, and the trick-winner UI', async ({
+  page,
+}) => {
   test.setTimeout(240000);
   await waitForReady(page);
 
@@ -59,13 +88,18 @@ test('full game using card clicks, raise-with-response, concede, and the trick-w
   await expect(page.getByTestId('trick-winner')).toBeVisible({ timeout: 8000 });
   await expect(page.locator('.trick-slot.winner')).toHaveCount(1);
   await expect(
-    page.locator('.log').getByText(/Player \d wins the trick/).first()
+    page
+      .locator('.log')
+      .getByText(/Player \d wins the trick/)
+      .first()
   ).toBeVisible();
 
   // === Raise + response — covers both accept and fold paths ===
   const ptsBefore = await readRoundPoints(page);
   await page.getByRole('button', { name: /Raise/ }).click();
-  await expect(page.locator('.log').getByText(/Team 1 proposes to raise/)).toBeVisible();
+  await expect(
+    page.locator('.log').getByText(/Team 1 proposes to raise/)
+  ).toBeVisible();
   const resolution = await waitForRaiseResolution(page);
   if (resolution === 'accepted') {
     expect(await readRoundPoints(page)).toBe(ptsBefore + 1);
@@ -109,13 +143,41 @@ test('full game using card clicks, raise-with-response, concede, and the trick-w
   // === Game must be over ===
   await expect(page.locator('.game-over')).toBeVisible({ timeout: 30000 });
   const final = await readScores(page);
-  expect(Math.max(final.team1, final.team2)).toBeGreaterThanOrEqual(final.target);
+  expect(Math.max(final.team1, final.team2)).toBeGreaterThanOrEqual(
+    final.target
+  );
 
-  await expect(page.locator('.log').getByText(/proposes to raise/).first()).toHaveCount(1);
-  const accepts = await page.locator('.log').getByText(/Team 2 accepts/).count();
-  const folds = await page.locator('.log').getByText(/Team 2 folds/).count();
+  await expect(
+    page
+      .locator('.log')
+      .getByText(/proposes to raise/)
+      .first()
+  ).toHaveCount(1);
+  const accepts = await page
+    .locator('.log')
+    .getByText(/Team 2 accepts/)
+    .count();
+  const folds = await page
+    .locator('.log')
+    .getByText(/Team 2 folds/)
+    .count();
   expect(accepts + folds).toBeGreaterThan(0);
-  await expect(page.locator('.log').getByText(/concedes/).first()).toHaveCount(1);
-  await expect(page.locator('.log').getByText(/Player \d wins the trick/).first()).toHaveCount(1);
-  await expect(page.locator('.log').getByText(/wins the game/).first()).toHaveCount(1);
+  await expect(
+    page
+      .locator('.log')
+      .getByText(/concedes/)
+      .first()
+  ).toHaveCount(1);
+  await expect(
+    page
+      .locator('.log')
+      .getByText(/Player \d wins the trick/)
+      .first()
+  ).toHaveCount(1);
+  await expect(
+    page
+      .locator('.log')
+      .getByText(/wins the game/)
+      .first()
+  ).toHaveCount(1);
 });

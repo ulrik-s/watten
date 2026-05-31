@@ -6,10 +6,16 @@ const HAND_SLOT = '.hand-slot';
 async function waitForReady(page: Page) {
   await page.goto('/?fast=1');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Watten');
-  await page.locator(SELECTABLE).first().waitFor({ state: 'visible', timeout: 30000 });
+  await page
+    .locator(SELECTABLE)
+    .first()
+    .waitFor({ state: 'visible', timeout: 30000 });
 }
 
-async function waitForHumanTurn(page: Page, timeoutMs = 30000): Promise<'turn' | 'gameover'> {
+async function waitForHumanTurn(
+  page: Page,
+  timeoutMs = 30000
+): Promise<'turn' | 'gameover'> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if ((await page.locator('.game-over').count()) > 0) return 'gameover';
@@ -45,21 +51,20 @@ async function snapshotHand(page: Page): Promise<Snapshot[]> {
   return out;
 }
 
-async function readScores(page: Page) {
-  const text = await page.locator('p').filter({ hasText: /Team 1/ }).first().innerText();
-  const m = text.match(/Team\s*1\s*(\d+)\s*[—-]\s*Team\s*2\s*(\d+)\s*\(to\s*(\d+)\)/);
-  if (!m) throw new Error('Cannot parse: ' + text);
-  return { team1: parseInt(m[1], 10), team2: parseInt(m[2], 10), target: parseInt(m[3], 10) };
-}
-
 async function readRoundNumber(page: Page): Promise<number> {
-  const text = await page.locator('p').filter({ hasText: /^Round\s+/ }).first().innerText();
+  const text = await page
+    .locator('p')
+    .filter({ hasText: /^Round\s+/ })
+    .first()
+    .innerText();
   const m = text.match(/Round\s+(\d+)/);
   if (!m) throw new Error('cannot parse round number: ' + text);
   return parseInt(m[1], 10);
 }
 
-test('the human must play exactly 5 cards (5 clicks) to finish a round', async ({ page }) => {
+test('the human must play exactly 5 cards (5 clicks) to finish a round', async ({
+  page,
+}) => {
   test.setTimeout(120000);
   await waitForReady(page);
 
@@ -89,10 +94,14 @@ test('the human must play exactly 5 cards (5 clicks) to finish a round', async (
   // plays one card per trick.
   expect(clicks).toBe(5);
   // And after those 5 clicks the round counter has moved on.
-  await expect.poll(() => readRoundNumber(page), { timeout: 30000 }).toBe(startRound + 1);
+  await expect
+    .poll(() => readRoundNumber(page), { timeout: 30000 })
+    .toBe(startRound + 1);
 });
 
-test('after a concede, the user still has to click through their remaining cards before the next deal', async ({ page }) => {
+test('after a concede, the user still has to click through their remaining cards before the next deal', async ({
+  page,
+}) => {
   test.setTimeout(120000);
   await waitForReady(page);
 
@@ -116,12 +125,16 @@ test('after a concede, the user still has to click through their remaining cards
     await page.waitForTimeout(150);
   }
 
-  await expect.poll(() => readRoundNumber(page), { timeout: 30000 }).toBe(startRound + 1);
+  await expect
+    .poll(() => readRoundNumber(page), { timeout: 30000 })
+    .toBe(startRound + 1);
   const after = await snapshotHand(page);
   expect(after.filter((s) => s.filled).length).toBe(5);
 });
 
-test('played slots stay empty until the round actually ends (no mid-round redeal)', async ({ page }) => {
+test('played slots stay empty until the round actually ends (no mid-round redeal)', async ({
+  page,
+}) => {
   test.setTimeout(120000);
   await waitForReady(page);
 

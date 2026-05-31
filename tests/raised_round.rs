@@ -95,11 +95,11 @@ fn raising_points_and_full_round() {
 
 /// Reproduces the user-reported bug: after Team 1 raises to 3 and Team 2
 /// accepts, Team 1 should receive 3 points if they win the round (not the
-/// pre-raise 2). Verified end-to-end with a real start_round_interactive
-/// deal driven through auto_play_round.
+/// pre-raise 2). Verified end-to-end with a real `start_round_interactive`
+/// deal driven through `auto_play_round`.
 #[test]
 fn accepted_raise_pays_out_at_increased_value() {
-    let mut g = watten::game::GameState::new(0); // no humans — all bots
+    let mut g = GameState::new(0); // no humans — all bots
     g.start_round_interactive();
     let dealer = g.dealer;
     let scores_before = g.scores;
@@ -120,7 +120,7 @@ fn accepted_raise_pays_out_at_increased_value() {
             assert_eq!(new_value, watten::game::ROUND_POINTS + 1);
             assert_eq!(g.round_points, watten::game::ROUND_POINTS + 1);
         }
-        _ => panic!("expected Accepted, got {:?}", outcome),
+        RaiseOutcome::Folded { .. } => panic!("expected Accepted, got {outcome:?}"),
     }
 
     // Play out every remaining card and let the engine call finish_round.
@@ -137,16 +137,14 @@ fn accepted_raise_pays_out_at_increased_value() {
         gained_team_1 + gained_team_2,
         watten::game::ROUND_POINTS + 1,
         "the round must pay out at the raised value (ROUND_POINTS+1 = 3), \
-         got team 1 gained {} and team 2 gained {}",
-        gained_team_1,
-        gained_team_2
+         got team 1 gained {gained_team_1} and team 2 gained {gained_team_2}"
     );
 }
 
-/// Two accepted raises (one by each team) should pay out at ROUND_POINTS+2.
+/// Two accepted raises (one by each team) should pay out at `ROUND_POINTS+2`.
 #[test]
 fn two_accepted_raises_pay_out_at_the_compounded_value() {
-    let mut g = watten::game::GameState::new(0);
+    let mut g = GameState::new(0);
     g.start_round_interactive();
     let scores_before = g.scores;
 
@@ -166,7 +164,7 @@ fn two_accepted_raises_pay_out_at_the_compounded_value() {
 fn human_must_play_five_cards_to_finish_a_round() {
     // Reproduces the user's report: after one human click, only the 5
     // tricks should not auto-complete. The human must press five times.
-    let mut g = watten::game::GameState::new(1); // 1 human (player 0)
+    let mut g = GameState::new(1); // 1 human (player 0)
     g.start_round_interactive();
 
     // Bots advance up to the human's turn — the human's hand must remain at 5.
@@ -213,7 +211,7 @@ fn concede_locks_in_winner_and_round_plays_to_completion() {
     // the engine auto-play every remaining card. Verify that no new deal
     // happens until every hand is empty, and that the conceded team
     // receives exactly round_points at finish_round time.
-    let mut g = watten::game::GameState::new(0);
+    let mut g = GameState::new(0);
     g.start_round_interactive();
     let dealer_at_start = g.dealer;
     // Every player has 5 cards immediately after a deal.

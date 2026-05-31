@@ -2,6 +2,8 @@
 name = "watten"
 version = "0.1.0"
 edition = "2021"
+# Private application crate — not published to any registry.
+publish = false
 
 [dependencies]
 rand = "0.8"
@@ -16,6 +18,33 @@ js-sys = "0.3"
 
 [lib]
 crate-type = ["rlib", "cdylib"]
+
+# Centralized lint configuration (inherited by all targets). Enforced in CI
+# via `cargo clippy --all-targets -- -D warnings`.
+[lints.rust]
+unused_qualifications = "warn"
+unreachable_pub = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Deliberately allowed: this engine packs small domain integers (perm
+# indices 0..120, trick counts 0..5) into u8/u32 on purpose, so the cast
+# lints are noise here.
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_possible_wrap = "allow"
+# Advisory-only style lints we opt out of for an application crate.
+must_use_candidate = "allow"
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+module_name_repetitions = "allow"
+# `as` casts in the wasm layer are intentional JS-boundary conversions.
+similar_names = "allow"
+# Local helper items (small const/fn) defined next to their use read more
+# clearly than hoisted to the top of a long function.
+items_after_statements = "allow"
 
 [package.metadata.wasm-pack.profile.release]
 # -O3 lets wasm-opt do aggressive optimisations. The 120^4 populate is
