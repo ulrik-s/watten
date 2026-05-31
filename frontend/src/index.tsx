@@ -26,9 +26,16 @@ const CARDS_PER_HAND = 5;
 // `?fast=1` query param trims the animation delays so E2E tests can drive
 // the full round-by-round play-out in a reasonable time. Real users get
 // the normal pacing.
-const FAST_MODE =
-  typeof window !== 'undefined' &&
-  new URLSearchParams(window.location.search).get('fast') === '1';
+const QUERY =
+  typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search)
+    : new URLSearchParams();
+const FAST_MODE = QUERY.get('fast') === '1';
+// Restrict the 120⁴ populate to a single permutation so the E2E suite
+// stays fast. Implied by `?fast=1`, but also available on its own
+// (`?smalldb=1`) for tests that need real animation timing but can't
+// afford the full multi-second populate. Real users get the full range.
+const SMALL_DB = FAST_MODE || QUERY.get('smalldb') === '1';
 const STEP_MS = FAST_MODE ? 10 : 320;
 // Hold the completed trick on screen long enough that a non-seer (who
 // doesn't see trump/striker on the header) can reason about why a card
@@ -161,10 +168,10 @@ const App = () => {
     void init().then(async () => {
       const g: TypedWasmGame = new WasmGame(1);
       // The full 120⁴ populate is too slow to run on every deal in the
-      // E2E suite, so `?fast=1` restricts it to a single permutation —
+      // E2E suite, so test modes restrict it to a single permutation —
       // the wasm layer exposes this precisely for tests. Real users get
       // the full range.
-      if (FAST_MODE) {
+      if (SMALL_DB) {
         g.set_perm_range_single(0);
       }
       // Debug convenience: expose the WasmGame on window so it can be

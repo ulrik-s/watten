@@ -457,8 +457,9 @@ test.describe('widgets', () => {
   }) => {
     test.setTimeout(60000);
     // Run this one at normal speed so the winner highlight is on screen long
-    // enough to inspect; the other tests use ?fast=1.
-    await page.goto('/');
+    // enough to inspect; the other tests use ?fast=1. `smalldb=1` keeps the
+    // real animation timing but skips the multi-second 120⁴ populate.
+    await page.goto('/?smalldb=1');
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Watten');
     await page
       .locator(SELECTABLE)
