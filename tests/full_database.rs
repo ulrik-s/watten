@@ -58,6 +58,12 @@ fn estimate_full_database_population_time() {
     let p = (g.dealer + 1) % 4;
     let allowed: Vec<usize> = (0..g.players[p].hand.len()).collect();
     let evs = g.evaluate_moves(p, &allowed, &[], [0, 0]);
-    assert!(evs.iter().any(|e| e.total > 0));
+    // The restricted perm_range [0, 1, 2] all start with hand-index 0, so
+    // every player is forced to play their index-0 card first. Whether the
+    // resulting completions are *legal* (counted in `total`) or rule
+    // violations (counted in `illegal`) depends on the random deal — so we
+    // assert the populate produced games for some move, not that this
+    // particular deal has a legal line.
+    assert!(evs.iter().any(|e| e.total + e.illegal > 0));
     assert!(est_full > 0.0);
 }
